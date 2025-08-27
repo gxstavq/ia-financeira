@@ -1,4 +1,3 @@
-# Esta é a versão final da minha IA.
 # Importa as ferramentas necessárias
 from flask import Flask, request
 import json
@@ -23,6 +22,35 @@ CSV_FILE_NAME = os.path.join(DATA_DIR, "meus_gastos.csv")
 SALDO_FILE_NAME = os.path.join(DATA_DIR, "saldo.csv")
 DIVIDAS_FILE_NAME = os.path.join(DATA_DIR, "dividas.csv")
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=-3))
+
+# >>> NOVO CÓDIGO: Mensagem de boas-vindas
+WELCOME_MESSAGE = """
+Olá! Eu sou a sua IA de controle financeiro.
+Você pode me enviar os seguintes comandos:
+
+💰 **Gastos e Saldo:**
+- Adicionar gasto: `[descrição] [valor]` (Ex: `Almoço 25`)
+- Adicionar pagamento: `pagamento [valor]` (Ex: `pagamento 1500`)
+- Saldo: `saldo`
+- Apagar último gasto: `apagar último`
+
+📋 **Dívidas:**
+- Adicionar dívida: `dívida [data] [valor] [descrição]` (Ex: `dívida 27/08 500 aluguel`)
+- Relatório de dívidas: `relatório dívidas`
+- Pagar dívida: `pagar dívida [descrição]`
+
+📊 **Relatórios:**
+- Resumo financeiro: `relatório financeiro`
+- Gastos de hoje: `relatório hoje`
+- Gastos da semana: `total da semana`
+- Gastos do mês: `total do mês`
+- Gastos por categoria: `total [categoria]` (Ex: `total almoço`)
+- Listar gastos: `listar [categoria]` (Ex: `listar mercado`)
+- Últimos 5 gastos: `últimos 5`
+
+Comece registrando seu primeiro gasto ou pagamento!
+"""
+# FIM DO NOVO CÓDIGO <<<
 
 # --- Funções da IA ---
 
