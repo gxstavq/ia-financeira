@@ -23,13 +23,14 @@ SALDO_FILE_NAME = os.path.join(DATA_DIR, "saldo.csv")
 DIVIDAS_FILE_NAME = os.path.join(DATA_DIR, "dividas.csv")
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=-3))
 
-# >>> CÓDIGO ALTERADO: Mensagem com a lista de comandos
-# Renomeei a variável para refletir que é apenas a lista de comandos.
+# >>> NOVO CÓDIGO: Mensagem de boas-vindas com dicas
 COMMANDS_MESSAGE = """
-Eu sou a sua IA de controle financeiro.
+Olá! Eu sou a sua IA de controle financeiro.
 Você pode me enviar os seguintes comandos:
 
 💰 **Gastos e Saldo:**
+- **Dica:** Para começar, registre seu saldo atual com o comando `pagamento [valor]`.
+
 - Adicionar gasto: `[descrição] [valor]` (Ex: `Almoço 25`)
 - Adicionar pagamento: `pagamento [valor]` (Ex: `pagamento 1500`)
 - Saldo: `saldo`
@@ -51,9 +52,9 @@ Você pode me enviar os seguintes comandos:
 
 Comece registrando seu primeiro gasto ou pagamento!
 """
-# FIM DA ALTERAÇÃO <<<
+# FIM DO NOVO CÓDIGO <<<
 
-# --- Funções da IA (permanecem as mesmas) ---
+# --- Funções da IA ---
 
 def save_debt_to_csv(user_id, date, value, description):
     new_row = f"{user_id};{date};{description};{value:.2f}\n"
@@ -415,11 +416,6 @@ def webhook():
             
             reply_message = ""
 
-            # >>> NOVO CÓDIGO: Lógica para o novo comando de listar por categoria
-            if message_text.startswith("listar "):
-                category = message_text.split("listar ")[1].strip()
-                reply_message = list_expenses_by_category(user_id, category)
-            # FIM DO NOVO CÓDIGO <<<
             # >>> CÓDIGO ALTERADO: Lógica para responder a saudações
             # Lista de saudações comuns que acionarão a mensagem de boas-vindas
             greetings = ["oi", "olá", "ola", "bom dia", "boa tarde", "boa noite", "e aí"]
@@ -427,7 +423,13 @@ def webhook():
                 # Formata a mensagem de boas-vindas com o nome do usuário e a lista de comandos
                 reply_message = f"Olá, {user_name}! 👋\n\n{COMMANDS_MESSAGE}"
             # FIM DA ALTERAÇÃO <<<
-
+            
+            # >>> NOVO CÓDIGO: Lógica para o novo comando de listar por categoria
+            elif message_text.startswith("listar "):
+                category = message_text.split("listar ")[1].strip()
+                reply_message = list_expenses_by_category(user_id, category)
+            # FIM DO NOVO CÓDIGO <<<
+            
             elif message_text.startswith("dívida "):
                 parsed_data = parse_debt_message(message_text)
                 if "error" in parsed_data:
