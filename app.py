@@ -144,15 +144,24 @@ def get_current_balance(user_id):
                 return float(row[1])
     return 0.0
 
+# >>> NOVO CÓDIGO: Agora, a função `save_expense_to_csv` inclui um ID.
 def save_expense_to_csv(user_id, description, value):
     now = datetime.datetime.now(TIMEZONE)
     timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
-    new_row = f"{user_id};{timestamp};{description};{value:.2f}\n"
+    
     file_exists = os.path.exists(CSV_FILE_NAME)
+    expense_id = 1
+    if file_exists and os.path.getsize(CSV_FILE_NAME) > 0:
+        with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
+            num_lines = sum(1 for line in file)
+            expense_id = num_lines
+    
+    new_row = f"{user_id};{expense_id};{timestamp};{description};{value:.2f}\n"
     with open(CSV_FILE_NAME, 'a', encoding='utf-8') as file:
         if not file_exists:
-            file.write("UserID;Data e Hora;Descricao;Valor\n")
+            file.write("UserID;ID;Data e Hora;Descricao;Valor\n")
         file.write(new_row)
+# FIM DO NOVO CÓDIGO <<<
 
 def get_month_total(user_id):
     if not os.path.exists(CSV_FILE_NAME): return "Nenhum gasto registrado ainda."
@@ -163,8 +172,8 @@ def get_month_total(user_id):
         try: next(reader)
         except StopIteration: return "Nenhum gasto neste mês ainda."
         for row in reader:
-            if row[0] == user_id and row[1].startswith(current_month_str):
-                total_month += float(row[3])
+            if row[0] == user_id and row[2].startswith(current_month_str):
+                total_month += float(row[4])
     return f"📊 Total do Mês 📊\n\nAté agora, você gastou um total de *R${total_month:.2f}* neste mês."
 
 def get_week_total(user_id):
@@ -179,10 +188,10 @@ def get_week_total(user_id):
         
         for row in reader:
             try:
-                expense_date_str = row[1].split(' ')[0]
+                expense_date_str = row[2].split(' ')[0]
                 expense_date = datetime.datetime.strptime(expense_date_str, "%Y-%m-%d").date()
                 if row[0] == user_id and expense_date >= start_of_week:
-                    total_week += float(row[3])
+                    total_week += float(row[4])
             except (ValueError, IndexError):
                 continue
     return f"🗓️ Total da Semana 🗓️\n\nAté agora, você gastou um total de *R${total_week:.2f}* nesta semana."
@@ -195,11 +204,10 @@ def get_category_total(user_id, category):
         try: next(reader)
         except StopIteration: return f"Nenhum gasto encontrado na categoria '{category}'."
         for row in reader:
-            if row[0] == user_id and category in row[2].lower():
-                total_category += float(row[3])
+            if row[0] == user_id and category in row[3].lower():
+                total_category += float(row[4])
     return f"📈 Total da Categoria '{category.capitalize()}' 📈\n\nVocê gastou *R${total_category:.2f}* com esta categoria."
 
-# >>> NOVO CÓDIGO: Função para listar gastos por categoria
 def list_expenses_by_category(user_id, category):
     if not os.path.exists(CSV_FILE_NAME):
         return f"Não encontrei nenhum gasto para a categoria '{category}'."
@@ -216,9 +224,9 @@ def list_expenses_by_category(user_id, category):
             return f"Não encontrei nenhum gasto para a categoria '{category}'."
 
         for row in reader:
-            if row[0] == user_id and category in row[2].lower():
-                description = row[2].capitalize()
-                value = float(row[3])
+            if row[0] == user_id and category in row[3].lower():
+                description = row[3].capitalize()
+                value = float(row[4])
                 list_lines.append(f"- {description}: R${value:.2f}")
                 total_category += value
                 found_expenses = True
@@ -228,6 +236,39 @@ def list_expenses_by_category(user_id, category):
         
     list_lines.append(f"\n*Total da Categoria: R${total_category:.2f}*")
     return "\n".join(list_lines)
+
+# >>> NOVO CÓDIGO: Função para apagar gasto por ID
+def delete_expense_by_id(user_id, expense_id):
+    if not os.path.exists(CSV_FILE_NAME):
+        return "Não há gastos para apagar."
+    lines = []
+    expense_found = False
+    with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
+        lines = file.readlines()
+    
+    new_lines = []
+    deleted_info = None
+    for line in lines:
+        parts = line.strip().split(';')
+        if len(parts) > 1 and parts[0] == user_id and parts[1] == str(expense_id):
+            deleted_info = parts
+            expense_found = True
+        else:
+            new_lines.append(line)
+            
+    if not expense_found:
+        return f"Não encontrei o gasto com ID '{expense_id}' para apagar."
+    
+    with open(CSV_FILE_NAME, 'w', encoding='utf-8') as file:
+        file.writelines(new_lines)
+        
+    deleted_description = deleted_info[3]
+    deleted_value = float(deleted_info[4])
+    
+    # Atualiza o saldo
+    record_payment_and_update_balance(user_id, deleted_value)
+    
+    return f"🗑️ Gasto com ID '{expense_id}' apagado!\n\n- Descrição: {deleted_description}\n- Valor: R${deleted_value:.2f}"
 # FIM DO NOVO CÓDIGO <<<
 
 def delete_last_expense(user_id):
@@ -246,13 +287,18 @@ def delete_last_expense(user_id):
         return "Você não tem gastos registrados para apagar."
     
     deleted_line = lines.pop(last_expense_of_user).strip().split(';')
-    deleted_description = deleted_line[2]
-    deleted_value = float(deleted_line[3])
+    deleted_description = deleted_line[3]
+    deleted_value = float(deleted_line[4])
 
     with open(CSV_FILE_NAME, 'w', encoding='utf-8') as file:
         file.writelines(lines)
+    
+    # Atualiza o saldo
+    record_payment_and_update_balance(user_id, deleted_value)
+
     return f"🗑️ Último gasto apagado!\n\n- Descrição: {deleted_description}\n- Valor: R${deleted_value:.2f}"
 
+# >>> NOVO CÓDIGO: A função `get_last_5_expenses` agora mostra o ID
 def get_last_5_expenses(user_id):
     if not os.path.exists(CSV_FILE_NAME): return "Nenhum gasto registrado ainda."
     all_expenses = []
@@ -262,10 +308,11 @@ def get_last_5_expenses(user_id):
         except StopIteration: return "Nenhum gasto registrado ainda."
         for row in reader:
             if row[0] == user_id:
-                all_expenses.append(f"- {row[2]}: R${float(row[3]):.2f}")
+                all_expenses.append(f"ID {row[1]} - {row[3]}: R${float(row[4]):.2f}")
     if not all_expenses: return "Nenhum gasto registrado ainda."
     last_5 = all_expenses[-5:]; last_5.reverse()
     return "🗓️ Seus Últimos 5 Gastos 🗓️\n\n" + "\n".join(last_5)
+# FIM DO NOVO CÓDIGO <<<
 
 def parse_expense_message(message_text):
     parts = message_text.strip().split()
@@ -377,9 +424,9 @@ def webhook():
                             return 'EVENT_RECEIVED', 200
                         
                         for row in reader:
-                            if row[0] == user_id and row[1].startswith(today_str):
-                                description = row[2].capitalize()
-                                value = float(row[3])
+                            if row[0] == user_id and row[2].startswith(today_str):
+                                description = row[3].capitalize()
+                                value = float(row[4])
                                 category_found = False
                                 common_categories = ['almoço', 'janta', 'transporte', 'compras', 'lazer', 'mercado']
                                 for cat in common_categories:
@@ -403,10 +450,16 @@ def webhook():
             elif message_text.startswith("total "):
                 category = message_text.split("total ")[1].strip()
                 reply_message = get_category_total(user_id, category)
-            # >>> NOVO CÓDIGO: Lógica para o novo comando de listar por categoria
             elif message_text.startswith("listar "):
                 category = message_text.split("listar ")[1].strip()
                 reply_message = list_expenses_by_category(user_id, category)
+            # >>> NOVO CÓDIGO: Lógica para o novo comando de apagar por ID
+            elif message_text.startswith("apagar gasto "):
+                try:
+                    expense_id = int(message_text.split("apagar gasto ")[1].strip())
+                    reply_message = delete_expense_by_id(user_id, expense_id)
+                except (ValueError, IndexError):
+                    reply_message = "Comando inválido. Por favor, use 'apagar gasto [ID]'."
             # FIM DO NOVO CÓDIGO <<<
             elif message_text == "total da semana":
                 reply_message = get_week_total(user_id)
