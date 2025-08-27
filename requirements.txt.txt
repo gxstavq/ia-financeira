@@ -2,3 +2,4 @@ Flask
 requests
 fuzzywuzzy
 python-Levenshtein
+# Forçando a atualização
