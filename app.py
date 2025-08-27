@@ -59,6 +59,34 @@ def get_debts_report(user_id):
     
     report_lines.append(f"\n*Total de Dívidas: R${total_debts:.2f}*")
     return "\n".join(report_lines)
+    
+# >>> NOVO CÓDIGO: Função para apagar uma dívida
+def delete_debt_from_csv(user_id, description_to_delete):
+    if not os.path.exists(DIVIDAS_FILE_NAME):
+        return "Não há dívidas para apagar."
+    
+    lines = []
+    debt_found = False
+    with open(DIVIDAS_FILE_NAME, 'r', encoding='utf-8') as file:
+        lines = file.readlines()
+
+    # Encontra a primeira linha que corresponde à dívida do usuário
+    new_lines = []
+    for line in lines:
+        if not debt_found and line.strip().split(';')[0] == user_id and description_to_delete in line.lower():
+            debt_found = True
+            continue  # Pula a linha para removê-la
+        new_lines.append(line)
+        
+    if not debt_found:
+        return f"Não encontrei a dívida '{description_to_delete}' para apagar."
+    
+    # Reescreve o arquivo sem a dívida
+    with open(DIVIDAS_FILE_NAME, 'w', encoding='utf-8') as file:
+        file.writelines(new_lines)
+        
+    return f"✅ Dívida '{description_to_delete}' paga e removida da sua lista!"
+# FIM DO NOVO CÓDIGO <<<
 
 def record_payment_and_update_balance(user_id, value):
     try:
@@ -234,7 +262,6 @@ def parse_debt_message(message_text):
 def send_whatsapp_message(phone_number, message_text):
     url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"; headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}; data = {"messaging_product": "whatsapp", "to": phone_number, "text": {"body": message_text}}; requests.post(url, headers=headers, json=data)
 
-# >>> NOVO CÓDIGO: Função para o relatório financeiro completo
 def get_financial_summary(user_id):
     current_balance = get_current_balance(user_id)
     total_debts = 0.0
@@ -250,7 +277,6 @@ def get_financial_summary(user_id):
                     except (ValueError, IndexError):
                         continue
     
-    # Supondo uma meta de 20% para guardar
     available_after_debts = current_balance - total_debts
     amount_to_save = available_after_debts * 0.20
     safe_to_spend = available_after_debts - amount_to_save
@@ -264,7 +290,6 @@ def get_financial_summary(user_id):
     report.append(f"\nSeu saldo para gastar livremente é: *R${safe_to_spend:.2f}*")
 
     return "\n".join(report)
-# FIM DO NOVO CÓDIGO <<<
 
 # Webhook principal
 @app.route('/webhook', methods=['GET', 'POST'])
@@ -293,6 +318,11 @@ def webhook():
                     description = parsed_data["description"]
                     save_debt_to_csv(user_id, date, value, description)
                     reply_message = f"✅ Dívida de R${value:.2f} com vencimento em {date} registrada!\n\n- Descrição: {description}"
+            # >>> NOVO CÓDIGO: Lógica para o novo comando de apagar dívida
+            elif message_text.startswith("pagar dívida "):
+                description_to_delete = message_text.split("pagar dívida ")[1].strip()
+                reply_message = delete_debt_from_csv(user_id, description_to_delete)
+            # FIM DO NOVO CÓDIGO <<<
             elif message_text == "relatório dívidas":
                 reply_message = get_debts_report(user_id)
             elif message_text.startswith("pagamento "):
