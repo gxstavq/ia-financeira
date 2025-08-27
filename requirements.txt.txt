@@ -3,3 +3,5 @@ requests
 fuzzywuzzy
 python-Levenshtein
 # Forçando a atualização
+fuzzywuzzy
+python-Levenshtein
