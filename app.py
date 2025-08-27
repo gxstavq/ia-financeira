@@ -144,7 +144,6 @@ def get_current_balance(user_id):
                 return float(row[1])
     return 0.0
 
-# >>> NOVO CÓDIGO: Agora, a função `save_expense_to_csv` inclui um ID.
 def save_expense_to_csv(user_id, description, value):
     now = datetime.datetime.now(TIMEZONE)
     timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -161,7 +160,6 @@ def save_expense_to_csv(user_id, description, value):
         if not file_exists:
             file.write("UserID;ID;Data e Hora;Descricao;Valor\n")
         file.write(new_row)
-# FIM DO NOVO CÓDIGO <<<
 
 def get_month_total(user_id):
     if not os.path.exists(CSV_FILE_NAME): return "Nenhum gasto registrado ainda."
@@ -237,7 +235,6 @@ def list_expenses_by_category(user_id, category):
     list_lines.append(f"\n*Total da Categoria: R${total_category:.2f}*")
     return "\n".join(list_lines)
 
-# >>> NOVO CÓDIGO: Função para apagar gasto por ID
 def delete_expense_by_id(user_id, expense_id):
     if not os.path.exists(CSV_FILE_NAME):
         return "Não há gastos para apagar."
@@ -265,11 +262,9 @@ def delete_expense_by_id(user_id, expense_id):
     deleted_description = deleted_info[3]
     deleted_value = float(deleted_info[4])
     
-    # Atualiza o saldo
     record_payment_and_update_balance(user_id, deleted_value)
     
     return f"🗑️ Gasto com ID '{expense_id}' apagado!\n\n- Descrição: {deleted_description}\n- Valor: R${deleted_value:.2f}"
-# FIM DO NOVO CÓDIGO <<<
 
 def delete_last_expense(user_id):
     if not os.path.exists(CSV_FILE_NAME): return "Não há gastos para apagar."
@@ -293,12 +288,10 @@ def delete_last_expense(user_id):
     with open(CSV_FILE_NAME, 'w', encoding='utf-8') as file:
         file.writelines(lines)
     
-    # Atualiza o saldo
     record_payment_and_update_balance(user_id, deleted_value)
 
     return f"🗑️ Último gasto apagado!\n\n- Descrição: {deleted_description}\n- Valor: R${deleted_value:.2f}"
 
-# >>> NOVO CÓDIGO: A função `get_last_5_expenses` agora mostra o ID
 def get_last_5_expenses(user_id):
     if not os.path.exists(CSV_FILE_NAME): return "Nenhum gasto registrado ainda."
     all_expenses = []
@@ -311,8 +304,7 @@ def get_last_5_expenses(user_id):
                 all_expenses.append(f"ID {row[1]} - {row[3]}: R${float(row[4]):.2f}")
     if not all_expenses: return "Nenhum gasto registrado ainda."
     last_5 = all_expenses[-5:]; last_5.reverse()
-    return "🗓️ Seus Últimos 5 Gastos 🗓️\n\n" + "\n".join(last_5)
-# FIM DO NOVO CÓDIGO <<<
+    return "🗓️ Seus Últimos 5 Gastos 🗓️\n\n" + "\n".join(all_expenses)
 
 def parse_expense_message(message_text):
     parts = message_text.strip().split()
@@ -453,14 +445,12 @@ def webhook():
             elif message_text.startswith("listar "):
                 category = message_text.split("listar ")[1].strip()
                 reply_message = list_expenses_by_category(user_id, category)
-            # >>> NOVO CÓDIGO: Lógica para o novo comando de apagar por ID
             elif message_text.startswith("apagar gasto "):
                 try:
                     expense_id = int(message_text.split("apagar gasto ")[1].strip())
                     reply_message = delete_expense_by_id(user_id, expense_id)
                 except (ValueError, IndexError):
                     reply_message = "Comando inválido. Por favor, use 'apagar gasto [ID]'."
-            # FIM DO NOVO CÓDIGO <<<
             elif message_text == "total da semana":
                 reply_message = get_week_total(user_id)
             elif message_text == "últimos 5":
