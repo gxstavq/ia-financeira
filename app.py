@@ -5,6 +5,7 @@ import requests
 import datetime
 import os
 import csv
+from collections import defaultdict
 
 # Cria a aplicação
 app = Flask(__name__)
@@ -64,7 +65,6 @@ def get_week_total(user_id):
                 continue
     return f"🗓️ Total da Semana 🗓️\n\nAté agora, você gastou um total de *R${total_week:.2f}* nesta semana."
 
-# >>> NOVO CÓDIGO: Função para somar por categoria
 def get_category_total(user_id, category):
     if not os.path.exists(CSV_FILE_NAME): return "Nenhum gasto registrado ainda."
     total_category = 0.0
@@ -73,7 +73,6 @@ def get_category_total(user_id, category):
         try: next(reader)
         except StopIteration: return f"Nenhum gasto encontrado na categoria '{category}'."
         for row in reader:
-            # O texto do gasto está na coluna 2
             if row[0] == user_id and category in row[2].lower():
                 total_category += float(row[3])
     return f"📈 Total da Categoria '{category.capitalize()}' 📈\n\nVocê gastou *R${total_category:.2f}* com esta categoria."
@@ -100,19 +99,6 @@ def delete_last_expense(user_id):
     with open(CSV_FILE_NAME, 'w', encoding='utf-8') as file:
         file.writelines(lines)
     return f"🗑️ Último gasto apagado!\n\n- Descrição: {deleted_description}\n- Valor: R${deleted_value:.2f}"
-
-def get_today_expenses(user_id):
-    if not os.path.exists(CSV_FILE_NAME): return "Nenhum gasto registrado ainda."
-    total_today = 0.0
-    today_str = datetime.datetime.now(TIMEZONE).strftime("%Y-%m-%d")
-    with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
-        reader = csv.reader(file, delimiter=';')
-        try: next(reader)
-        except StopIteration: return "Nenhum gasto registrado hoje."
-        for row in reader:
-            if row[0] == user_id and row[1].startswith(today_str):
-                total_today += float(row[3])
-    return f"🧾 Relatório de Hoje 🧾\n\nVocê gastou um total de *R${total_today:.2f}* hoje."
 
 def get_last_5_expenses(user_id):
     if not os.path.exists(CSV_FILE_NAME): return "Nenhum gasto registrado ainda."
@@ -155,15 +141,52 @@ def webhook():
             reply_message = ""
 
             # >>> NOVO CÓDIGO: Lógica para o novo comando
-            if message_text.startswith("total "):
-                # Pega a categoria após a palavra "total "
+            if message_text == "relatório hoje":
+                if not os.path.exists(CSV_FILE_NAME): 
+                    reply_message = "Nenhum gasto registrado ainda."
+                else:
+                    today_str = datetime.datetime.now(TIMEZONE).strftime("%Y-%m-%d")
+                    category_totals = defaultdict(float)
+                    with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
+                        reader = csv.reader(file, delimiter=';')
+                        try: next(reader)
+                        except StopIteration:
+                            reply_message = "Nenhum gasto registrado hoje."
+                            send_whatsapp_message(user_id, reply_message)
+                            return 'EVENT_RECEIVED', 200
+                        
+                        for row in reader:
+                            if row[0] == user_id and row[1].startswith(today_str):
+                                description = row[2].capitalize()
+                                value = float(row[3])
+                                # Lógica para encontrar a categoria no texto do gasto
+                                category_found = False
+                                # Categorias comuns (pode ser ajustado)
+                                common_categories = ['almoço', 'janta', 'transporte', 'compras', 'lazer', 'mercado']
+                                for cat in common_categories:
+                                    if cat in description.lower():
+                                        category_totals[cat.capitalize()] += value
+                                        category_found = True
+                                        break
+                                if not category_found:
+                                    category_totals['Outros'] += value
+
+                    if not category_totals:
+                        reply_message = "Nenhum gasto registrado hoje."
+                    else:
+                        reply_lines = ["🧾 Relatório de Hoje 🧾\n"]
+                        total_geral = 0.0
+                        for category, total in category_totals.items():
+                            reply_lines.append(f"- {category}: R${total:.2f}")
+                            total_geral += total
+                        reply_lines.append(f"\n*Total Geral: R${total_geral:.2f}*")
+                        reply_message = "\n".join(reply_lines)
+            # FIM DO NOVO CÓDIGO <<<
+            elif message_text.startswith("total "):
                 category = message_text.split("total ")[1].strip()
                 reply_message = get_category_total(user_id, category)
-            # FIM DO NOVO CÓDIGO <<<
             elif message_text == "total da semana":
                 reply_message = get_week_total(user_id)
-            elif message_text == "relatório hoje":
-                reply_message = get_today_expenses(user_id)
             elif message_text == "últimos 5":
                 reply_message = get_last_5_expenses(user_id)
             elif message_text == "total do mês":
