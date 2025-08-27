@@ -52,13 +52,20 @@ def get_week_total(user_id):
     start_of_week = today - datetime.timedelta(days=today.weekday())
     with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
         reader = csv.reader(file, delimiter=';')
-        try: next(reader)
-        except StopIteration: return "Nenhum gasto nesta semana ainda."
+        try:
+            next(reader) # Pula a linha de cabeçalho
+        except StopIteration:
+            return "Nenhum gasto nesta semana ainda."
+        
         for row in reader:
-            expense_date_str = row[1].split(' ')[0]
-            expense_date = datetime.datetime.strptime(expense_date_str, "%Y-%m-%d").date()
-            if row[0] == user_id and expense_date >= start_of_week:
-                total_week += float(row[3])
+            try:
+                expense_date_str = row[1].split(' ')[0]
+                expense_date = datetime.datetime.strptime(expense_date_str, "%Y-%m-%d").date()
+                if row[0] == user_id and expense_date >= start_of_week:
+                    total_week += float(row[3])
+            except (ValueError, IndexError):
+                # Ignora linhas com formato incorreto (corrompidas ou sem data)
+                continue
     return f"🗓️ Total da Semana 🗓️\n\nAté agora, você gastou um total de *R${total_week:.2f}* nesta semana."
 
 def delete_last_expense(user_id):
