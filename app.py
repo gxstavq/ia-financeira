@@ -23,9 +23,10 @@ SALDO_FILE_NAME = os.path.join(DATA_DIR, "saldo.csv")
 DIVIDAS_FILE_NAME = os.path.join(DATA_DIR, "dividas.csv")
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=-3))
 
-# >>> NOVO CÓDIGO: Mensagem de boas-vindas
-WELCOME_MESSAGE = """
-Olá! Eu sou a sua IA de controle financeiro.
+# >>> CÓDIGO ALTERADO: Mensagem com a lista de comandos
+# Renomeei a variável para refletir que é apenas a lista de comandos.
+COMMANDS_MESSAGE = """
+Eu sou a sua IA de controle financeiro.
 Você pode me enviar os seguintes comandos:
 
 💰 **Gastos e Saldo:**
@@ -50,9 +51,9 @@ Você pode me enviar os seguintes comandos:
 
 Comece registrando seu primeiro gasto ou pagamento!
 """
-# FIM DO NOVO CÓDIGO <<<
+# FIM DA ALTERAÇÃO <<<
 
-# --- Funções da IA ---
+# --- Funções da IA (permanecem as mesmas) ---
 
 def save_debt_to_csv(user_id, date, value, description):
     new_row = f"{user_id};{date};{description};{value:.2f}\n"
@@ -397,13 +398,32 @@ def webhook():
     if request.method == 'POST':
         data = request.get_json()
         try:
-            message_data = data['entry'][0]['changes'][0]['value']['messages'][0]
+            # >>> CÓDIGO ALTERADO: Extração de dados do usuário e da mensagem
+            # Pega o objeto 'value' que contém todos os dados da mensagem
+            value = data['entry'][0]['changes'][0]['value']
+            
+            # Extrai o nome do usuário de forma segura, com um valor padrão "Pessoa"
+            user_name = "Pessoa"
+            if 'contacts' in value and len(value['contacts']) > 0:
+                user_name = value['contacts'][0].get('profile', {}).get('name', 'Pessoa')
+
+            # Extrai os dados da mensagem
+            message_data = value['messages'][0]
             user_id = message_data['from']
             message_text = message_data['text']['body'].strip().lower()
+            # FIM DA ALTERAÇÃO <<<
             
             reply_message = ""
 
-            if message_text.startswith("dívida "):
+            # >>> CÓDIGO ALTERADO: Lógica para responder a saudações
+            # Lista de saudações comuns que acionarão a mensagem de boas-vindas
+            greetings = ["oi", "olá", "ola", "bom dia", "boa tarde", "boa noite", "e aí"]
+            if message_text in greetings:
+                # Formata a mensagem de boas-vindas com o nome do usuário e a lista de comandos
+                reply_message = f"Olá, {user_name}! 👋\n\n{COMMANDS_MESSAGE}"
+            # FIM DA ALTERAÇÃO <<<
+
+            elif message_text.startswith("dívida "):
                 parsed_data = parse_debt_message(message_text)
                 if "error" in parsed_data:
                     reply_message = parsed_data["error"]
@@ -491,13 +511,18 @@ def webhook():
             else:
                 parsed_data = parse_expense_message(message_text)
                 if "error" in parsed_data:
-                    reply_message = "Comando não reconhecido..."
+                    # Mensagem padrão para comandos não reconhecidos
+                    reply_message = f"Desculpe, {user_name}, não entendi o comando. Se precisar de ajuda, envie 'oi' para ver a lista de comandos."
                 else:
                     desc = parsed_data["description"]; val = parsed_data["value"]
                     save_expense_to_csv(user_id, desc, val)
                     record_expense_and_update_balance(user_id, val)
                     reply_message = f"✅ Gasto Registrado!\n\n- Descrição: {desc}\n- Valor: R${val:.2f}"
             
-            send_whatsapp_message(user_id, reply_message)
-        except (KeyError, IndexError, TypeError): pass
+            # Envia a mensagem de resposta se alguma foi definida
+            if reply_message:
+                send_whatsapp_message(user_id, reply_message)
+        except (KeyError, IndexError, TypeError): 
+            # Ignora eventos que não são mensagens de texto (ex: status, etc.)
+            pass
         return 'EVENT_RECEIVED', 200
