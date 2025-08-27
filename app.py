@@ -44,7 +44,6 @@ def get_month_total(user_id):
                 total_month += float(row[3])
     return f"📊 Total do Mês 📊\n\nAté agora, você gastou um total de *R${total_month:.2f}* neste mês."
 
-# >>> NOVO CÓDIGO: Função para somar os gastos da semana
 def get_week_total(user_id):
     if not os.path.exists(CSV_FILE_NAME): return "Nenhum gasto registrado ainda."
     total_week = 0.0
@@ -52,10 +51,8 @@ def get_week_total(user_id):
     start_of_week = today - datetime.timedelta(days=today.weekday())
     with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
         reader = csv.reader(file, delimiter=';')
-        try:
-            next(reader) # Pula a linha de cabeçalho
-        except StopIteration:
-            return "Nenhum gasto nesta semana ainda."
+        try: next(reader)
+        except StopIteration: return "Nenhum gasto nesta semana ainda."
         
         for row in reader:
             try:
@@ -64,9 +61,22 @@ def get_week_total(user_id):
                 if row[0] == user_id and expense_date >= start_of_week:
                     total_week += float(row[3])
             except (ValueError, IndexError):
-                # Ignora linhas com formato incorreto (corrompidas ou sem data)
                 continue
     return f"🗓️ Total da Semana 🗓️\n\nAté agora, você gastou um total de *R${total_week:.2f}* nesta semana."
+
+# >>> NOVO CÓDIGO: Função para somar por categoria
+def get_category_total(user_id, category):
+    if not os.path.exists(CSV_FILE_NAME): return "Nenhum gasto registrado ainda."
+    total_category = 0.0
+    with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
+        reader = csv.reader(file, delimiter=';')
+        try: next(reader)
+        except StopIteration: return f"Nenhum gasto encontrado na categoria '{category}'."
+        for row in reader:
+            # O texto do gasto está na coluna 2
+            if row[0] == user_id and category in row[2].lower():
+                total_category += float(row[3])
+    return f"📈 Total da Categoria '{category.capitalize()}' 📈\n\nVocê gastou *R${total_category:.2f}* com esta categoria."
 
 def delete_last_expense(user_id):
     if not os.path.exists(CSV_FILE_NAME): return "Não há gastos para apagar."
@@ -90,7 +100,6 @@ def delete_last_expense(user_id):
     with open(CSV_FILE_NAME, 'w', encoding='utf-8') as file:
         file.writelines(lines)
     return f"🗑️ Último gasto apagado!\n\n- Descrição: {deleted_description}\n- Valor: R${deleted_value:.2f}"
-
 
 def get_today_expenses(user_id):
     if not os.path.exists(CSV_FILE_NAME): return "Nenhum gasto registrado ainda."
@@ -145,10 +154,14 @@ def webhook():
             
             reply_message = ""
 
-            # >>> NOVO CÓDIGO: Adicionamos o novo comando aqui
-            if message_text == "total da semana":
-                reply_message = get_week_total(user_id)
+            # >>> NOVO CÓDIGO: Lógica para o novo comando
+            if message_text.startswith("total "):
+                # Pega a categoria após a palavra "total "
+                category = message_text.split("total ")[1].strip()
+                reply_message = get_category_total(user_id, category)
             # FIM DO NOVO CÓDIGO <<<
+            elif message_text == "total da semana":
+                reply_message = get_week_total(user_id)
             elif message_text == "relatório hoje":
                 reply_message = get_today_expenses(user_id)
             elif message_text == "últimos 5":
