@@ -18,27 +18,16 @@ VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 
 DATA_DIR = os.getenv('RENDER_DISK_PATH', '.')
 CSV_FILE_NAME = os.path.join(DATA_DIR, "meus_gastos.csv")
-SALDO_FILE_NAME = os.path.join(DATA_DIR, "saldo.csv") # >>> NOVO CÓDIGO: Nome do arquivo de saldo
+SALDO_FILE_NAME = os.path.join(DATA_DIR, "saldo.csv")
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=-3))
 
 # --- Funções da IA (Agora recebem o user_id) ---
 
-# >>> NOVO CÓDIGO: Função para lidar com pagamentos
 def record_payment_and_update_balance(user_id, value):
     try:
-        current_balance = 0.0
-        # Tenta ler o saldo do arquivo
-        if os.path.exists(SALDO_FILE_NAME):
-            with open(SALDO_FILE_NAME, 'r', encoding='utf-8') as file:
-                reader = csv.reader(file, delimiter=';')
-                for row in reader:
-                    if row[0] == user_id:
-                        current_balance = float(row[1])
-                        break
-        
+        current_balance = get_current_balance(user_id)
         new_balance = current_balance + value
         
-        # Reescreve o arquivo com o novo saldo
         lines = []
         user_found = False
         if os.path.exists(SALDO_FILE_NAME):
@@ -58,17 +47,44 @@ def record_payment_and_update_balance(user_id, value):
         return f"✅ Pagamento de R${value:.2f} registrado!\n\nSeu saldo atual é de *R${new_balance:.2f}*."
     except Exception as e:
         return f"Ocorreu um erro ao registrar o pagamento: {e}"
+
+# >>> NOVO CÓDIGO: Função para subtrair um gasto do saldo
+def record_expense_and_update_balance(user_id, value):
+    try:
+        current_balance = get_current_balance(user_id)
+        new_balance = current_balance - value
+        
+        lines = []
+        user_found = False
+        if os.path.exists(SALDO_FILE_NAME):
+            with open(SALDO_FILE_NAME, 'r', encoding='utf-8') as file:
+                lines = file.readlines()
+        
+        with open(SALDO_FILE_NAME, 'w', encoding='utf-8') as file:
+            for line in lines:
+                if line.startswith(user_id):
+                    file.write(f"{user_id};{new_balance:.2f}\n")
+                    user_found = True
+                else:
+                    file.write(line)
+            if not user_found:
+                file.write(f"{user_id};{new_balance:.2f}\n")
+                
+        return True # Retorna True se deu certo
+    except Exception:
+        return False # Retorna False se deu errado
+
+# FIM DO NOVO CÓDIGO <<<
         
 def get_current_balance(user_id):
     if not os.path.exists(SALDO_FILE_NAME):
-        return "Nenhum saldo registrado ainda."
+        return 0.0
     with open(SALDO_FILE_NAME, 'r', encoding='utf-8') as file:
         reader = csv.reader(file, delimiter=';')
         for row in reader:
             if row[0] == user_id:
                 return float(row[1])
-    return "Nenhum saldo registrado ainda."
-# FIM DO NOVO CÓDIGO <<<
+    return 0.0
 
 def save_expense_to_csv(user_id, description, value):
     now = datetime.datetime.now(TIMEZONE)
@@ -188,7 +204,6 @@ def webhook():
             
             reply_message = ""
 
-            # >>> NOVO CÓDIGO: Lógica para o novo comando
             if message_text.startswith("pagamento "):
                 try:
                     value_str = message_text.split(" ")[1].replace(',', '.')
@@ -196,6 +211,10 @@ def webhook():
                     reply_message = record_payment_and_update_balance(user_id, value)
                 except (ValueError, IndexError):
                     reply_message = "Comando inválido. Por favor, use 'pagamento [valor]'."
+            # >>> NOVO CÓDIGO: Adiciona o comando saldo
+            elif message_text == "saldo":
+                balance = get_current_balance(user_id)
+                reply_message = f"💵 Saldo Atual 💵\n\nSeu saldo atual é de *R${balance:.2f}*."
             # FIM DO NOVO CÓDIGO <<<
             elif message_text == "relatório hoje":
                 if not os.path.exists(CSV_FILE_NAME): 
@@ -253,6 +272,9 @@ def webhook():
                 else:
                     desc = parsed_data["description"]; val = parsed_data["value"]
                     save_expense_to_csv(user_id, desc, val)
+                    # >>> NOVO CÓDIGO: Subtrai do saldo
+                    record_expense_and_update_balance(user_id, val)
+                    # FIM DO NOVO CÓDIGO <<<
                     reply_message = f"✅ Gasto Registrado!\n\n- Descrição: {desc}\n- Valor: R${val:.2f}"
             
             send_whatsapp_message(user_id, reply_message)
