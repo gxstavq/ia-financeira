@@ -415,6 +415,11 @@ def webhook():
             
             reply_message = ""
 
+            # >>> NOVO CÓDIGO: Lógica para o novo comando de listar por categoria
+            if message_text.startswith("listar "):
+                category = message_text.split("listar ")[1].strip()
+                reply_message = list_expenses_by_category(user_id, category)
+            # FIM DO NOVO CÓDIGO <<<
             # >>> CÓDIGO ALTERADO: Lógica para responder a saudações
             # Lista de saudações comuns que acionarão a mensagem de boas-vindas
             greetings = ["oi", "olá", "ola", "bom dia", "boa tarde", "boa noite", "e aí"]
@@ -491,9 +496,6 @@ def webhook():
             elif message_text.startswith("total "):
                 category = message_text.split("total ")[1].strip()
                 reply_message = get_category_total(user_id, category)
-            elif message_text.startswith("listar "):
-                category = message_text.split("listar ")[1].strip()
-                reply_message = list_expenses_by_category(user_id, category)
             elif message_text.startswith("apagar gasto "):
                 try:
                     expense_id = int(message_text.split("apagar gasto ")[1].strip())
@@ -511,18 +513,13 @@ def webhook():
             else:
                 parsed_data = parse_expense_message(message_text)
                 if "error" in parsed_data:
-                    # Mensagem padrão para comandos não reconhecidos
-                    reply_message = f"Desculpe, {user_name}, não entendi o comando. Se precisar de ajuda, envie 'oi' para ver a lista de comandos."
+                    reply_message = "Comando não reconhecido..."
                 else:
                     desc = parsed_data["description"]; val = parsed_data["value"]
                     save_expense_to_csv(user_id, desc, val)
                     record_expense_and_update_balance(user_id, val)
                     reply_message = f"✅ Gasto Registrado!\n\n- Descrição: {desc}\n- Valor: R${val:.2f}"
             
-            # Envia a mensagem de resposta se alguma foi definida
-            if reply_message:
-                send_whatsapp_message(user_id, reply_message)
-        except (KeyError, IndexError, TypeError): 
-            # Ignora eventos que não são mensagens de texto (ex: status, etc.)
-            pass
+            send_whatsapp_message(user_id, reply_message)
+        except (KeyError, IndexError, TypeError): pass
         return 'EVENT_RECEIVED', 200
