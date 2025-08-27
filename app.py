@@ -16,45 +16,43 @@ PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 # --- FIM DAS CREDENCIAIS ---
 
-# Configuração do disco persistente (alterar para o caminho correto do Render)
+# Configuração do disco persistente
 DATA_DIR = os.getenv('RENDER_DISK_PATH', '.')
 CSV_FILE_NAME = os.path.join(DATA_DIR, "meus_gastos.csv")
 SALDO_FILE_NAME = os.path.join(DATA_DIR, "saldo.csv")
 DIVIDAS_FILE_NAME = os.path.join(DATA_DIR, "dividas.csv")
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=-3))
 
-# >>> NOVO CÓDIGO: Mensagem de boas-vindas com dicas
+# >>> CÓDIGO ALTERADO: Mensagem de boas-vindas com comandos simplificados
 COMMANDS_MESSAGE = """
-Olá! Eu sou a sua IA de controle financeiro.
+Eu sou a sua IA de controle financeiro.
 Você pode me enviar os seguintes comandos:
 
 💰 **Gastos e Saldo:**
-- **Dica:** Para começar, registre seu saldo atual com o comando `pagamento [valor]`.
-
-- Adicionar gasto: `[descrição] [valor]` (Ex: `Almoço 25`)
-- Adicionar pagamento: `pagamento [valor]` (Ex: `pagamento 1500`)
-- Saldo: `saldo`
-- Apagar último gasto: `apagar último`
+- **Adicionar gasto:** `[descrição] [valor]` (Ex: `Almoço 25`)
+- **Adicionar pagamento:** `pagamento [valor]` (Ex: `pagamento 1500`)
+- **Ver saldo:** `ver saldo`
+- **Apagar último gasto:** `apagar último gasto`
 
 📋 **Dívidas:**
-- Adicionar dívida: `dívida [data] [valor] [descrição]` (Ex: `dívida 27/08 500 aluguel`)
-- Relatório de dívidas: `relatório dívidas`
-- Pagar dívida: `pagar dívida [descrição]`
+- **Adicionar dívida:** `nova dívida [data] [valor] [descrição]` (Ex: `nova dívida 27/08 500 aluguel`)
+- **Ver dívidas:** `ver dívidas`
+- **Pagar dívida:** `pagar dívida [descrição]`
 
 📊 **Relatórios:**
-- Resumo financeiro: `relatório financeiro`
-- Gastos de hoje: `relatório hoje`
-- Gastos da semana: `total da semana`
-- Gastos do mês: `total do mês`
-- Gastos por categoria: `total [categoria]` (Ex: `total almoço`)
-- Listar gastos: `listar [categoria]` (Ex: `listar mercado`)
-- Últimos 5 gastos: `últimos 5`
+- **Resumo financeiro:** `resumo financeiro`
+- **Gastos de hoje:** `gastos de hoje`
+- **Gastos da semana:** `gastos da semana`
+- **Gastos do mês:** `gastos do mês`
+- **Total por categoria:** `total [categoria]` (Ex: `total almoço`)
+- **Listar gastos:** `listar gastos [categoria]` (Ex: `listar gastos mercado`)
+- **Últimos 5 gastos:** `últimos 5 gastos`
 
 Comece registrando seu primeiro gasto ou pagamento!
 """
-# FIM DO NOVO CÓDIGO <<<
+# FIM DA ALTERAÇÃO <<<
 
-# --- Funções da IA ---
+# --- Funções da IA (permanecem as mesmas) ---
 
 def save_debt_to_csv(user_id, date, value, description):
     new_row = f"{user_id};{date};{description};{value:.2f}\n"
@@ -335,7 +333,7 @@ def get_last_5_expenses(user_id):
                 all_expenses.append(f"ID {row[1]} - {row[3]}: R${float(row[4]):.2f}")
     if not all_expenses: return "Nenhum gasto registrado ainda."
     last_5 = all_expenses[-5:]; last_5.reverse()
-    return "🗓️ Seus Últimos 5 Gastos 🗓️\n\n" + "\n".join(all_expenses)
+    return "🗓️ Seus Últimos 5 Gastos 🗓️\n\n" + "\n".join(last_5)
 
 def parse_expense_message(message_text):
     parts = message_text.strip().split()
@@ -344,17 +342,20 @@ def parse_expense_message(message_text):
     except ValueError: return {"error": f"Não entendi o valor '{parts[-1]}'."}
     
 def parse_debt_message(message_text):
-    parts = message_text.strip().split()
-    if len(parts) < 4: return {"error": "Formato inválido. Use 'dívida [data] [valor] [descrição]'."}
+    # >>> CÓDIGO ALTERADO: Ajuste para o novo comando "nova dívida"
+    parts = message_text.replace("nova dívida ", "").strip().split()
+    if len(parts) < 3: return {"error": "Formato inválido. Use 'nova dívida [data] [valor] [descrição]'."}
+    # FIM DA ALTERAÇÃO <<<
     try:
-        date_str = parts[1]
-        value_str = parts[2].replace(',', '.')
+        date_str = parts[0]
+        value_str = parts[1].replace(',', '.')
         value = float(value_str)
-        description = " ".join(parts[3:])
+        description = " ".join(parts[2:])
+        # Valida o formato da data
         datetime.datetime.strptime(date_str, "%d/%m")
         return {"date": date_str, "value": value, "description": description.capitalize()}
     except (ValueError, IndexError):
-        return {"error": "Formato de data ou valor inválido. Use 'dívida [data] [valor] [descrição]'."}
+        return {"error": "Formato de data ou valor inválido. Use 'nova dívida [data] [valor] [descrição]'."}
 
 def send_whatsapp_message(phone_number, message_text):
     url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"; headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}; data = {"messaging_product": "whatsapp", "to": phone_number, "text": {"body": message_text}}; requests.post(url, headers=headers, json=data)
@@ -399,38 +400,24 @@ def webhook():
     if request.method == 'POST':
         data = request.get_json()
         try:
-            # >>> CÓDIGO ALTERADO: Extração de dados do usuário e da mensagem
-            # Pega o objeto 'value' que contém todos os dados da mensagem
             value = data['entry'][0]['changes'][0]['value']
             
-            # Extrai o nome do usuário de forma segura, com um valor padrão "Pessoa"
             user_name = "Pessoa"
             if 'contacts' in value and len(value['contacts']) > 0:
                 user_name = value['contacts'][0].get('profile', {}).get('name', 'Pessoa')
 
-            # Extrai os dados da mensagem
             message_data = value['messages'][0]
             user_id = message_data['from']
             message_text = message_data['text']['body'].strip().lower()
-            # FIM DA ALTERAÇÃO <<<
             
             reply_message = ""
 
-            # >>> CÓDIGO ALTERADO: Lógica para responder a saudações
-            # Lista de saudações comuns que acionarão a mensagem de boas-vindas
-            greetings = ["oi", "olá", "ola", "bom dia", "boa tarde", "boa noite", "e aí"]
+            greetings = ["oi", "olá", "ola", "bom dia", "boa tarde", "boa noite", "e aí", "ajuda", "comandos"]
             if message_text in greetings:
-                # Formata a mensagem de boas-vindas com o nome do usuário e a lista de comandos
                 reply_message = f"Olá, {user_name}! 👋\n\n{COMMANDS_MESSAGE}"
-            # FIM DA ALTERAÇÃO <<<
             
-            # >>> NOVO CÓDIGO: Lógica para o novo comando de listar por categoria
-            elif message_text.startswith("listar "):
-                category = message_text.split("listar ")[1].strip()
-                reply_message = list_expenses_by_category(user_id, category)
-            # FIM DO NOVO CÓDIGO <<<
-            
-            elif message_text.startswith("dívida "):
+            # >>> CÓDIGO ALTERADO: Lógica com os novos comandos
+            elif message_text.startswith("nova dívida "):
                 parsed_data = parse_debt_message(message_text)
                 if "error" in parsed_data:
                     reply_message = parsed_data["error"]
@@ -443,7 +430,7 @@ def webhook():
             elif message_text.startswith("pagar dívida "):
                 description_to_delete = message_text.split("pagar dívida ")[1].strip()
                 reply_message = delete_debt_from_csv(user_id, description_to_delete)
-            elif message_text == "relatório dívidas":
+            elif message_text == "ver dívidas":
                 reply_message = get_debts_report(user_id)
             elif message_text.startswith("pagamento "):
                 try:
@@ -452,12 +439,13 @@ def webhook():
                     reply_message = record_payment_and_update_balance(user_id, value)
                 except (ValueError, IndexError):
                     reply_message = "Comando inválido. Por favor, use 'pagamento [valor]'."
-            elif message_text == "relatório financeiro":
+            elif message_text == "resumo financeiro":
                 reply_message = get_financial_summary(user_id)
-            elif message_text == "saldo":
+            elif message_text == "ver saldo":
                 balance = get_current_balance(user_id)
                 reply_message = f"💵 Saldo Atual 💵\n\nSeu saldo atual é de *R${balance:.2f}*."
-            elif message_text == "relatório hoje":
+            elif message_text == "gastos de hoje":
+                # A lógica para o relatório diário continua a mesma, apenas o comando mudou
                 if not os.path.exists(CSV_FILE_NAME): 
                     reply_message = "Nenhum gasto registrado ainda."
                 else:
@@ -498,30 +486,36 @@ def webhook():
             elif message_text.startswith("total "):
                 category = message_text.split("total ")[1].strip()
                 reply_message = get_category_total(user_id, category)
+            elif message_text.startswith("listar gastos "):
+                category = message_text.split("listar gastos ")[1].strip()
+                reply_message = list_expenses_by_category(user_id, category)
             elif message_text.startswith("apagar gasto "):
                 try:
                     expense_id = int(message_text.split("apagar gasto ")[1].strip())
                     reply_message = delete_expense_by_id(user_id, expense_id)
                 except (ValueError, IndexError):
                     reply_message = "Comando inválido. Por favor, use 'apagar gasto [ID]'."
-            elif message_text == "total da semana":
+            elif message_text == "gastos da semana":
                 reply_message = get_week_total(user_id)
-            elif message_text == "últimos 5":
+            elif message_text == "últimos 5 gastos":
                 reply_message = get_last_5_expenses(user_id)
-            elif message_text == "total do mês":
+            elif message_text == "gastos do mês":
                 reply_message = get_month_total(user_id)
-            elif message_text == "apagar último":
+            elif message_text == "apagar último gasto":
                 reply_message = delete_last_expense(user_id)
+            # FIM DA ALTERAÇÃO <<<
             else:
                 parsed_data = parse_expense_message(message_text)
                 if "error" in parsed_data:
-                    reply_message = "Comando não reconhecido..."
+                    reply_message = f"Desculpe, {user_name}, não entendi o comando. Envie 'oi' para ver a lista de comandos."
                 else:
                     desc = parsed_data["description"]; val = parsed_data["value"]
                     save_expense_to_csv(user_id, desc, val)
                     record_expense_and_update_balance(user_id, val)
                     reply_message = f"✅ Gasto Registrado!\n\n- Descrição: {desc}\n- Valor: R${val:.2f}"
             
-            send_whatsapp_message(user_id, reply_message)
-        except (KeyError, IndexError, TypeError): pass
+            if reply_message:
+                send_whatsapp_message(user_id, reply_message)
+        except (KeyError, IndexError, TypeError): 
+            pass
         return 'EVENT_RECEIVED', 200
