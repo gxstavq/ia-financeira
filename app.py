@@ -19,12 +19,11 @@ VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 DATA_DIR = os.getenv('RENDER_DISK_PATH', '.')
 CSV_FILE_NAME = os.path.join(DATA_DIR, "meus_gastos.csv")
 SALDO_FILE_NAME = os.path.join(DATA_DIR, "saldo.csv")
-DIVIDAS_FILE_NAME = os.path.join(DATA_DIR, "dividas.csv") # >>> NOVO CÓDIGO: Nome do arquivo de dívidas
+DIVIDAS_FILE_NAME = os.path.join(DATA_DIR, "dividas.csv")
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=-3))
 
 # --- Funções da IA ---
 
-# >>> NOVO CÓDIGO: Funções para dívidas
 def save_debt_to_csv(user_id, date, value, description):
     new_row = f"{user_id};{date};{description};{value:.2f}\n"
     file_exists = os.path.exists(DIVIDAS_FILE_NAME)
@@ -59,7 +58,6 @@ def get_debts_report(user_id):
     
     report_lines.append(f"\n*Total de Dívidas: R${total_debts:.2f}*")
     return "\n".join(report_lines)
-# FIM DO NOVO CÓDIGO <<<
 
 def record_payment_and_update_balance(user_id, value):
     try:
@@ -219,7 +217,6 @@ def parse_expense_message(message_text):
     try: value_str = parts[-1].replace(',', '.'); value = float(value_str); description = " ".join(parts[:-1]); return {"description": description.capitalize(), "value": value}
     except ValueError: return {"error": f"Não entendi o valor '{parts[-1]}'."}
     
-# >>> NOVO CÓDIGO: Função para parsing de dívidas
 def parse_debt_message(message_text):
     parts = message_text.strip().split()
     if len(parts) < 4: return {"error": "Formato inválido. Use 'dívida [data] [valor] [descrição]'."}
@@ -233,10 +230,41 @@ def parse_debt_message(message_text):
         return {"date": date_str, "value": value, "description": description.capitalize()}
     except (ValueError, IndexError):
         return {"error": "Formato de data ou valor inválido. Use 'dívida [data] [valor] [descrição]'."}
-# FIM DO NOVO CÓDIGO <<<
 
 def send_whatsapp_message(phone_number, message_text):
     url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"; headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}; data = {"messaging_product": "whatsapp", "to": phone_number, "text": {"body": message_text}}; requests.post(url, headers=headers, json=data)
+
+# >>> NOVO CÓDIGO: Função para o relatório financeiro completo
+def get_financial_summary(user_id):
+    current_balance = get_current_balance(user_id)
+    total_debts = 0.0
+    if os.path.exists(DIVIDAS_FILE_NAME):
+        with open(DIVIDAS_FILE_NAME, 'r', encoding='utf-8') as file:
+            reader = csv.reader(file, delimiter=';')
+            try: next(reader)
+            except StopIteration: pass
+            for row in reader:
+                if row[0] == user_id:
+                    try:
+                        total_debts += float(row[3])
+                    except (ValueError, IndexError):
+                        continue
+    
+    # Supondo uma meta de 20% para guardar
+    available_after_debts = current_balance - total_debts
+    amount_to_save = available_after_debts * 0.20
+    safe_to_spend = available_after_debts - amount_to_save
+    
+    report = []
+    report.append("💰 Resumo Financeiro Completo 💰\n")
+    report.append(f"Seu saldo atual é: *R${current_balance:.2f}*")
+    report.append(f"Suas dívidas totais são: *R${total_debts:.2f}*")
+    report.append(f"O valor na conta após pagar as dívidas seria: *R${available_after_debts:.2f}*")
+    report.append(f"Você deve guardar (20%): *R${amount_to_save:.2f}*")
+    report.append(f"\nSeu saldo para gastar livremente é: *R${safe_to_spend:.2f}*")
+
+    return "\n".join(report)
+# FIM DO NOVO CÓDIGO <<<
 
 # Webhook principal
 @app.route('/webhook', methods=['GET', 'POST'])
@@ -255,7 +283,6 @@ def webhook():
             
             reply_message = ""
 
-            # >>> NOVO CÓDIGO: Lógica para dívidas
             if message_text.startswith("dívida "):
                 parsed_data = parse_debt_message(message_text)
                 if "error" in parsed_data:
@@ -268,7 +295,6 @@ def webhook():
                     reply_message = f"✅ Dívida de R${value:.2f} com vencimento em {date} registrada!\n\n- Descrição: {description}"
             elif message_text == "relatório dívidas":
                 reply_message = get_debts_report(user_id)
-            # FIM DO NOVO CÓDIGO <<<
             elif message_text.startswith("pagamento "):
                 try:
                     value_str = message_text.split(" ")[1].replace(',', '.')
@@ -276,6 +302,10 @@ def webhook():
                     reply_message = record_payment_and_update_balance(user_id, value)
                 except (ValueError, IndexError):
                     reply_message = "Comando inválido. Por favor, use 'pagamento [valor]'."
+            # >>> NOVO CÓDIGO: Lógica para o novo relatório
+            elif message_text == "relatório financeiro":
+                reply_message = get_financial_summary(user_id)
+            # FIM DO NOVO CÓDIGO <<<
             elif message_text == "saldo":
                 balance = get_current_balance(user_id)
                 reply_message = f"💵 Saldo Atual 💵\n\nSeu saldo atual é de *R${balance:.2f}*."
