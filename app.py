@@ -18,9 +18,57 @@ VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 
 DATA_DIR = os.getenv('RENDER_DISK_PATH', '.')
 CSV_FILE_NAME = os.path.join(DATA_DIR, "meus_gastos.csv")
+SALDO_FILE_NAME = os.path.join(DATA_DIR, "saldo.csv") # >>> NOVO CÓDIGO: Nome do arquivo de saldo
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=-3))
 
 # --- Funções da IA (Agora recebem o user_id) ---
+
+# >>> NOVO CÓDIGO: Função para lidar com pagamentos
+def record_payment_and_update_balance(user_id, value):
+    try:
+        current_balance = 0.0
+        # Tenta ler o saldo do arquivo
+        if os.path.exists(SALDO_FILE_NAME):
+            with open(SALDO_FILE_NAME, 'r', encoding='utf-8') as file:
+                reader = csv.reader(file, delimiter=';')
+                for row in reader:
+                    if row[0] == user_id:
+                        current_balance = float(row[1])
+                        break
+        
+        new_balance = current_balance + value
+        
+        # Reescreve o arquivo com o novo saldo
+        lines = []
+        user_found = False
+        if os.path.exists(SALDO_FILE_NAME):
+            with open(SALDO_FILE_NAME, 'r', encoding='utf-8') as file:
+                lines = file.readlines()
+        
+        with open(SALDO_FILE_NAME, 'w', encoding='utf-8') as file:
+            for line in lines:
+                if line.startswith(user_id):
+                    file.write(f"{user_id};{new_balance:.2f}\n")
+                    user_found = True
+                else:
+                    file.write(line)
+            if not user_found:
+                file.write(f"{user_id};{new_balance:.2f}\n")
+                
+        return f"✅ Pagamento de R${value:.2f} registrado!\n\nSeu saldo atual é de *R${new_balance:.2f}*."
+    except Exception as e:
+        return f"Ocorreu um erro ao registrar o pagamento: {e}"
+        
+def get_current_balance(user_id):
+    if not os.path.exists(SALDO_FILE_NAME):
+        return "Nenhum saldo registrado ainda."
+    with open(SALDO_FILE_NAME, 'r', encoding='utf-8') as file:
+        reader = csv.reader(file, delimiter=';')
+        for row in reader:
+            if row[0] == user_id:
+                return float(row[1])
+    return "Nenhum saldo registrado ainda."
+# FIM DO NOVO CÓDIGO <<<
 
 def save_expense_to_csv(user_id, description, value):
     now = datetime.datetime.now(TIMEZONE)
@@ -141,7 +189,15 @@ def webhook():
             reply_message = ""
 
             # >>> NOVO CÓDIGO: Lógica para o novo comando
-            if message_text == "relatório hoje":
+            if message_text.startswith("pagamento "):
+                try:
+                    value_str = message_text.split(" ")[1].replace(',', '.')
+                    value = float(value_str)
+                    reply_message = record_payment_and_update_balance(user_id, value)
+                except (ValueError, IndexError):
+                    reply_message = "Comando inválido. Por favor, use 'pagamento [valor]'."
+            # FIM DO NOVO CÓDIGO <<<
+            elif message_text == "relatório hoje":
                 if not os.path.exists(CSV_FILE_NAME): 
                     reply_message = "Nenhum gasto registrado ainda."
                 else:
@@ -159,9 +215,7 @@ def webhook():
                             if row[0] == user_id and row[1].startswith(today_str):
                                 description = row[2].capitalize()
                                 value = float(row[3])
-                                # Lógica para encontrar a categoria no texto do gasto
                                 category_found = False
-                                # Categorias comuns (pode ser ajustado)
                                 common_categories = ['almoço', 'janta', 'transporte', 'compras', 'lazer', 'mercado']
                                 for cat in common_categories:
                                     if cat in description.lower():
@@ -181,7 +235,6 @@ def webhook():
                             total_geral += total
                         reply_lines.append(f"\n*Total Geral: R${total_geral:.2f}*")
                         reply_message = "\n".join(reply_lines)
-            # FIM DO NOVO CÓDIGO <<<
             elif message_text.startswith("total "):
                 category = message_text.split("total ")[1].strip()
                 reply_message = get_category_total(user_id, category)
