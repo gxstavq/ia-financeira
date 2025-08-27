@@ -16,6 +16,7 @@ PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 # --- FIM DAS CREDENCIAIS ---
 
+# Configuração do disco persistente (alterar para o caminho correto do Render)
 DATA_DIR = os.getenv('RENDER_DISK_PATH', '.')
 CSV_FILE_NAME = os.path.join(DATA_DIR, "meus_gastos.csv")
 SALDO_FILE_NAME = os.path.join(DATA_DIR, "saldo.csv")
@@ -225,7 +226,6 @@ def parse_debt_message(message_text):
         value_str = parts[2].replace(',', '.')
         value = float(value_str)
         description = " ".join(parts[3:])
-        # Validação da data
         datetime.datetime.strptime(date_str, "%d/%m")
         return {"date": date_str, "value": value, "description": description.capitalize()}
     except (ValueError, IndexError):
@@ -259,7 +259,7 @@ def get_financial_summary(user_id):
     report.append("💰 Resumo Financeiro Completo 💰\n")
     report.append(f"Seu saldo atual é: *R${current_balance:.2f}*")
     report.append(f"Suas dívidas totais são: *R${total_debts:.2f}*")
-    report.append(f"O valor na conta após pagar as dívidas seria: *R${available_after_debts:.2f}*")
+    report.append(f"Valor na conta após pagar as dívidas: *R${available_after_debts:.2f}*")
     report.append(f"Você deve guardar (20%): *R${amount_to_save:.2f}*")
     report.append(f"\nSeu saldo para gastar livremente é: *R${safe_to_spend:.2f}*")
 
@@ -302,10 +302,8 @@ def webhook():
                     reply_message = record_payment_and_update_balance(user_id, value)
                 except (ValueError, IndexError):
                     reply_message = "Comando inválido. Por favor, use 'pagamento [valor]'."
-            # >>> NOVO CÓDIGO: Lógica para o novo relatório
             elif message_text == "relatório financeiro":
                 reply_message = get_financial_summary(user_id)
-            # FIM DO NOVO CÓDIGO <<<
             elif message_text == "saldo":
                 balance = get_current_balance(user_id)
                 reply_message = f"💵 Saldo Atual 💵\n\nSeu saldo atual é de *R${balance:.2f}*."
