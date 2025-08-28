@@ -23,11 +23,9 @@ DATA_DIR = os.getenv('RENDER_DISK_PATH', '.')
 CSV_FILE_NAME = os.path.join(DATA_DIR, "meus_gastos.csv")
 SALDO_FILE_NAME = os.path.join(DATA_DIR, "saldo.csv")
 DIVIDAS_FILE_NAME = os.path.join(DATA_DIR, "dividas.csv")
-# >>> NOVOS FICHEIROS PARA AS NOVAS FUNCIONALIDADES
 ORCAMENTO_FILE_NAME = os.path.join(DATA_DIR, "orcamento.csv")
 METAS_FILE_NAME = os.path.join(DATA_DIR, "metas.csv")
 RECORRENTES_FILE_NAME = os.path.join(DATA_DIR, "recorrentes.csv")
-# FIM DA ALTERAÇÃO <<<
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=-3))
 
 # Dicionário de palavras-chave para categorização automática
@@ -39,7 +37,6 @@ CATEGORY_KEYWORDS = {
     "Saúde": ["farmácia", "remédio", "médico", "consulta", "plano", "academia", "suplemento"],
     "Compras": ["roupas", "presente", "shopping", "online", "eletrônicos"],
     "Educação": ["curso", "livro", "faculdade", "material"],
-    # Categorias para o Orçamento 50/30/20
     "Essenciais": ["aluguel", "condomínio", "luz", "água", "internet", "gás", "iptu", "mercado", "farmácia", "plano", "metrô", "ônibus"],
     "Desejos": ["restaurante", "ifood", "rappi", "lanche", "pizza", "cinema", "show", "bar", "festa", "viagem", "streaming", "jogo", "roupas", "presente", "shopping", "uber", "99", "táxi"]
 }
@@ -50,6 +47,7 @@ Olá! Sou a sua assistente financeira. 😊
 Você pode falar comigo de forma natural! Tente coisas como:
 
 - `gastei 25,50 no almoço`
+- `recebi meu pagamento de 2.500,08`
 - `qual o meu saldo?`
 - `define meu rendimento em 3000`
 - `meu orçamento`
@@ -93,6 +91,29 @@ def parse_value_string(s):
         s = s.replace(',', '')
     return float(s)
 
+# >>> NOVO CÓDIGO: Função mais inteligente para extrair o valor monetário de uma frase
+def extract_monetary_value(text):
+    """
+    Usa regex para encontrar o valor monetário mais provável numa frase.
+    Lida com formatos como 2.500,08, 1500, 25,50.
+    Retorna o valor como float e a string original do valor.
+    """
+    # Regex para encontrar números com separadores de milhar e decimais
+    pattern = r'\b\d{1,3}(?:\.?\d{3})*(?:,\d{2})?\b|\b\d+(?:,\d{2})?\b'
+    matches = re.findall(pattern, text)
+    
+    if not matches:
+        return None, None
+
+    # O valor mais provável é o último número encontrado na frase
+    value_str = matches[-1]
+    try:
+        value_float = parse_value_string(value_str)
+        return value_float, value_str
+    except (ValueError, IndexError):
+        return None, None
+# FIM DO NOVO CÓDIGO <<<
+
 def infer_category(description):
     for category, keywords in CATEGORY_KEYWORDS.items():
         if category in ["Essenciais", "Desejos"]: continue
@@ -130,7 +151,7 @@ def set_income(user_id, income):
         if not any(line.startswith("UserID;Rendimento") for line in lines):
             file.write("UserID;Rendimento\n")
         for line in lines:
-            if line.startswith("UserID;Rendimento"): continue # Pula o cabeçalho antigo se houver
+            if line.startswith("UserID;Rendimento"): continue
             if line.startswith(user_id):
                 file.write(f"{user_id};{income:.2f}\n")
                 user_found = True
@@ -199,8 +220,7 @@ def compare_expenses(user_id):
     last_month_date = now.replace(day=1) - datetime.timedelta(days=1)
     last_month_str = last_month_date.strftime("%Y-%m")
     
-    current_month_total = 0.0
-    last_month_total = 0.0
+    current_month_total, last_month_total = 0.0, 0.0
 
     if not os.path.exists(CSV_FILE_NAME):
         return "Não há dados suficientes para comparar os seus gastos."
@@ -212,19 +232,15 @@ def compare_expenses(user_id):
             if row and row[0] == user_id:
                 try:
                     timestamp, value = row[2], float(row[4])
-                    if timestamp.startswith(current_month_str):
-                        current_month_total += value
-                    elif timestamp.startswith(last_month_str):
-                        last_month_total += value
-                except (ValueError, IndexError):
-                    continue
+                    if timestamp.startswith(current_month_str): current_month_total += value
+                    elif timestamp.startswith(last_month_str): last_month_total += value
+                except (ValueError, IndexError): continue
 
     if last_month_total == 0:
         return f"Você não tem gastos registados no mês passado para comparar. Total deste mês: R${current_month_total:.2f}"
 
     difference = current_month_total - last_month_total
     percentage_change = (difference / last_month_total) * 100
-    
     comparison_text = "aumentaram" if difference > 0 else "diminuíram"
     
     report = [
@@ -281,7 +297,7 @@ def delete_last_expense(user_id):
     if not os.path.exists(CSV_FILE_NAME): return "Não há gastos para apagar."
     lines, last_expense_of_user = [], -1
     with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file: lines = file.readlines()
-    for i in range(len(lines) - 1, 0, -1): # Começa do fim, ignora o cabeçalho
+    for i in range(len(lines) - 1, 0, -1):
         if lines[i].strip().split(';')[0] == user_id:
             last_expense_of_user = i
             break
@@ -289,12 +305,10 @@ def delete_last_expense(user_id):
     deleted_line = lines.pop(last_expense_of_user).strip().split(';')
     deleted_description, deleted_value = deleted_line[3], float(deleted_line[4])
     with open(CSV_FILE_NAME, 'w', encoding='utf-8') as file: file.writelines(lines)
-    # Devolve o dinheiro ao saldo
-    record_payment_and_update_balance(user_id, deleted_value)
+    record_payment_and_update_balance(user_id, deleted_value) # Devolve o dinheiro
     return f"🗑️ Último gasto apagado!\n- Descrição: {deleted_description}\n- Valor: R${deleted_value:.2f}"
 
 def get_financial_summary(user_id):
-    # Esta função pode ser melhorada para usar os dados do orçamento no futuro
     balance = get_current_balance(user_id)
     return f"💰 *Resumo Financeiro*\nSeu saldo atual é: *R${balance:.2f}*."
 
@@ -330,62 +344,46 @@ def webhook():
             
             # --- LÓGICA DE COMANDOS MAIS HUMANA E ABRANGENTE ---
             
-            # Comandos de ajuda e saudação
             if any(greeting in message_text for greeting in ["oi", "olá", "ajuda", "comandos", "menu"]):
                 reply_message = f"Olá, {user_name}! 👋\n\n{COMMANDS_MESSAGE}"
-            
-            # Comandos de Orçamento
             elif "definir rendimento" in message_text or "meu rendimento é" in message_text:
-                try:
-                    income_str = re.search(r'(\d+([,.]\d{1,2})?)', message_text).group(0)
-                    income = parse_value_string(income_str)
-                    reply_message = set_income(user_id, income)
-                except:
-                    reply_message = "Não entendi o valor. Tente `definir rendimento [valor]`."
+                value, value_str = extract_monetary_value(message_text)
+                if value: reply_message = set_income(user_id, value)
+                else: reply_message = "Não entendi o valor. Tente `definir rendimento [valor]`."
             elif "meu orçamento" in message_text:
                 reply_message = get_budget_report(user_id)
-
-            # Comandos de Análise e Dicas
             elif "dica" in message_text:
                 reply_message = get_financial_tip()
             elif "comparar gastos" in message_text:
                 reply_message = compare_expenses(user_id)
             elif "resumo financeiro" in message_text:
                 reply_message = get_financial_summary(user_id)
-
-            # Comandos de Saldo
             elif any(s in message_text for s in ["qual o meu saldo", "meu saldo", "ver saldo"]):
                  balance = get_current_balance(user_id)
                  reply_message = f"💵 Seu saldo atual é de *R${balance:.2f}*."
-
-            # Comando para apagar último gasto
             elif "apagar último" in message_text or "excluir último" in message_text:
                 reply_message = delete_last_expense(user_id)
-
-            # Comando de Pagamento
-            elif message_text.startswith("pagamento"):
-                try:
-                    value_str = message_text.split(" ", 1)[1].strip()
-                    value = parse_value_string(value_str)
+            
+            # >>> CÓDIGO ALTERADO: Lógica para diferenciar pagamento de gasto
+            elif any(keyword in message_text for keyword in ["pagamento", "recebi", "salário"]):
+                value, value_str = extract_monetary_value(message_text)
+                if value:
                     reply_message = record_payment_and_update_balance(user_id, value)
-                except (ValueError, IndexError):
-                    reply_message = "Comando inválido. Use: `pagamento [valor]`."
+                else:
+                    reply_message = "Entendi que é um pagamento, mas não consegui identificar o valor. Tente de novo, por favor."
+            # FIM DA ALTERAÇÃO <<<
 
-            # Se não for nenhum comando, assume que é um registo de gasto
             else:
-                try:
-                    # Tenta extrair valor e descrição de uma frase natural
-                    value_str = re.search(r'(\d+([,.]\d{1,2})?)$', message_text).group(0)
-                    value = parse_value_string(value_str)
+                value, value_str = extract_monetary_value(message_text)
+                if value:
                     description = message_text.replace(value_str, '').strip()
-                    
                     if not description:
-                         reply_message = "Parece que você enviou um valor sem descrição. Tente de novo, por favor."
+                        reply_message = "Parece que você enviou um valor sem descrição. Tente de novo, por favor."
                     else:
                         category = save_expense_to_csv(user_id, description.capitalize(), value)
                         record_expense_and_update_balance(user_id, value)
                         reply_message = f"✅ Gasto Registrado! ({category})\n- {description.capitalize()}: R${value:.2f}"
-                except:
+                else:
                     reply_message = f"Não entendi, {user_name}. Se for um gasto, tente `[descrição] [valor]`. Se precisar de ajuda, envie `comandos`."
 
             if reply_message:
