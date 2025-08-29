@@ -120,9 +120,7 @@ def parse_value_string(s):
             s = s.replace('.', '')
     return float(s)
 
-# >>> CÓDIGO ALTERADO: A função agora extrai TODOS os valores
 def extract_all_monetary_values(text):
-    """Usa regex para encontrar todos os valores monetários numa frase."""
     pattern = r'(\d{1,3}(?:\.\d{3})*,\d{1,2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+)'
     matches = re.findall(pattern, text)
     if not matches:
@@ -135,7 +133,6 @@ def extract_all_monetary_values(text):
         except (ValueError, IndexError):
             continue
     return values
-# FIM DA ALTERAÇÃO <<<
 
 def infer_category(description):
     for category, keywords in CATEGORY_KEYWORDS.items():
@@ -163,9 +160,7 @@ def save_expense_to_csv(user_id, description, value):
 
 # --- NOVAS FUNÇÕES E FUNÇÕES EXISTENTES ---
 
-# >>> NOVO CÓDIGO: Função para definir o saldo diretamente
 def set_balance(user_id, value):
-    """Define (sobrescreve) o saldo de um utilizador."""
     lines = []
     user_found = False
     if os.path.exists(SALDO_FILE_NAME):
@@ -185,10 +180,8 @@ def set_balance(user_id, value):
         if not user_found:
             file.write(f"{user_id};{value:.2f}\n")
     return f"✅ Saldo atualizado! Seu novo saldo é de *R${value:.2f}*."
-# FIM DO NOVO CÓDIGO <<<
 
 def set_income(user_id, income):
-    # ... (código existente)
     user_found = False
     lines = []
     if os.path.exists(ORCAMENTO_FILE_NAME):
@@ -211,7 +204,6 @@ def set_income(user_id, income):
 
 
 def get_budget_report(user_id):
-    # ... (código existente)
     income = 0.0
     if not os.path.exists(ORCAMENTO_FILE_NAME):
         return "Você ainda não definiu o seu rendimento. Use `definir rendimento [valor]` para começar."
@@ -255,7 +247,6 @@ def get_budget_report(user_id):
     return "\n".join(report)
 
 def get_financial_tip():
-    # ... (código existente)
     tips = [
         "Dica: Anote todos os seus gastos, até os pequenos. Isso cria consciência de para onde o seu dinheiro está a ir.",
         "Dica: Antes de uma compra por impulso, espere 24 horas. Muitas vezes, a vontade passa e você economiza.",
@@ -266,7 +257,6 @@ def get_financial_tip():
     return random.choice(tips)
 
 def compare_expenses(user_id):
-    # ... (código existente)
     now = datetime.datetime.now(TIMEZONE)
     current_month_str = now.strftime("%Y-%m")
     last_month_date = now.replace(day=1) - datetime.timedelta(days=1)
@@ -304,7 +294,6 @@ def compare_expenses(user_id):
     return "\n".join(report)
 
 def get_current_balance(user_id):
-    # ... (código existente)
     if not os.path.exists(SALDO_FILE_NAME): return 0.0
     with open(SALDO_FILE_NAME, 'r', encoding='utf-8') as file:
         reader = csv.reader(file, delimiter=';')
@@ -313,7 +302,6 @@ def get_current_balance(user_id):
     return 0.0
 
 def record_payment_and_update_balance(user_id, value):
-    # ... (código existente)
     try:
         current_balance = get_current_balance(user_id)
         new_balance = current_balance + value
@@ -326,11 +314,14 @@ def record_payment_and_update_balance(user_id, value):
                     file.write(f"{user_id};{new_balance:.2f}\n"); user_found = True
                 else: file.write(line)
             if not user_found: file.write(f"{user_id};{new_balance:.2f}\n")
-        return f"✅ Pagamento de R${value:.2f} registrado!\n\nSeu saldo atual é de *R${new_balance:.2f}*."
+        
+        # >>> CÓDIGO ALTERADO: Adiciona a data à mensagem de confirmação
+        today_str = datetime.datetime.now(TIMEZONE).strftime("%d/%m")
+        return f"✅ Pagamento de R${value:.2f} registrado em {today_str}!\n\nSeu saldo atual é de *R${new_balance:.2f}*."
+        # FIM DA ALTERAÇÃO <<<
     except Exception as e: return f"Ocorreu um erro ao registrar o pagamento: {e}"
 
 def record_expense_and_update_balance(user_id, value):
-    # ... (código existente)
     try:
         current_balance = get_current_balance(user_id)
         new_balance = current_balance - value
@@ -347,7 +338,6 @@ def record_expense_and_update_balance(user_id, value):
     except Exception: return False
 
 def delete_last_expense(user_id):
-    # ... (código existente)
     if not os.path.exists(CSV_FILE_NAME): return "Não há gastos para apagar."
     lines, last_expense_of_user = [], -1
     with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file: lines = file.readlines()
@@ -363,7 +353,6 @@ def delete_last_expense(user_id):
     return f"🗑️ Último gasto apagado!\n- Descrição: {deleted_description}\n- Valor: R${deleted_value:.2f}"
 
 def get_financial_summary(user_id):
-    # ... (código existente)
     balance = get_current_balance(user_id)
     return f"💰 *Resumo Financeiro*\nSeu saldo atual é: *R${balance:.2f}*."
 
@@ -408,7 +397,6 @@ def get_period_report(user_id, period):
     return "\n".join(report_lines)
 
 def send_whatsapp_message(phone_number, message_text):
-    # ... (código existente)
     try:
         url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
         headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
@@ -454,9 +442,13 @@ def webhook():
                 reply_message = compare_expenses(user_id)
             elif "resumo financeiro" in message_text:
                 reply_message = get_financial_summary(user_id)
-            elif any(s in message_text for s in ["qual o meu saldo", "meu saldo", "ver saldo"]):
+            
+            # >>> CÓDIGO ALTERADO: Lógica de saldo muito mais flexível
+            elif any(s in message_text for s in ["qual o meu saldo", "meu saldo", "ver saldo", "saldo atual", "como está meu saldo"]):
                  balance = get_current_balance(user_id)
                  reply_message = f"💵 Seu saldo atual é de *R${balance:.2f}*."
+            # FIM DA ALTERAÇÃO <<<
+
             elif "apagar último" in message_text or "excluir último" in message_text:
                 reply_message = delete_last_expense(user_id)
             elif "meta" in message_text or "recorrente" in message_text:
@@ -472,26 +464,21 @@ def webhook():
                 else:
                     reply_message = "Não entendi o período. Tente `gastos do dia`, `da semana` ou `do mês`."
             
-            # >>> CÓDIGO ALTERADO: Lógica inteligente para pagamentos e saldo inicial
             elif any(keyword in message_text for keyword in ["pagamento", "recebi", "salário"]):
                 values = extract_all_monetary_values(message_text)
                 if not values:
                     reply_message = "Entendi que é um pagamento, mas não consegui identificar o valor."
-                # Se o utilizador diz que "já tinha" um valor, soma tudo para definir o saldo inicial
                 elif any(keyword in message_text for keyword in ["já tinha", "tinha na conta"]):
                     total_balance = sum(values)
                     reply_message = set_balance(user_id, total_balance)
-                # Caso contrário, é um pagamento normal que se soma ao saldo existente
                 else:
-                    payment_value = max(values) # Pega o maior valor como o pagamento principal
+                    payment_value = max(values)
                     reply_message = record_payment_and_update_balance(user_id, payment_value)
-            # FIM DA ALTERAÇÃO <<<
 
             else:
                 values = extract_all_monetary_values(message_text)
                 if values:
                     value = values[0]
-                    # Remove todos os números e "R$" para isolar a descrição
                     description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{1,2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', message_text).strip()
                     description = re.sub(r'^(de|da|do|no|na)\s', '', description)
                     if not description:
@@ -499,7 +486,10 @@ def webhook():
                     else:
                         category = save_expense_to_csv(user_id, description.capitalize(), value)
                         record_expense_and_update_balance(user_id, value)
-                        reply_message = f"✅ Gasto Registrado! ({category})\n- {description.capitalize()}: R${value:.2f}"
+                        # >>> CÓDIGO ALTERADO: Adiciona a data à mensagem de confirmação
+                        today_str = datetime.datetime.now(TIMEZONE).strftime("%d/%m")
+                        reply_message = f"✅ Gasto Registrado em {today_str}! ({category})\n- {description.capitalize()}: R${value:.2f}"
+                        # FIM DA ALTERAÇÃO <<<
                 else:
                     reply_message = f"Não entendi, {user_name}. Se for um gasto, tente `[descrição] [valor]`. Se precisar de ajuda, envie `comandos`."
 
