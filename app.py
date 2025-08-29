@@ -38,7 +38,8 @@ CATEGORY_KEYWORDS = {
         "cerveja", "vinho", "suco", "água", "energético", "quitanda", "mercearia", "conveniência", "delivery",
         "marmita", "quentinha", "sushi", "temaki", "japonês", "chinês", "italiano", "mexicano", "árabe",
         "pão", "leite", "queijo", "presunto", "frutas", "verduras", "legumes", "carne", "frango", "peixe",
-        "ovos", "arroz", "feijão", "macarrão", "molho", "biscoito", "bolacha", "chocolate", "bombom", "cereal"
+        "ovos", "arroz", "feijão", "macarrão", "molho", "biscoito", "bolacha", "chocolate", "bombom", "cereal",
+        "chiclete"
     ],
     "Transporte": [
         "uber", "99", "táxi", "gasolina", "etanol", "diesel", "combustível", "metrô", "ônibus", "trem", "passagem", 
@@ -123,22 +124,43 @@ FINANCIAL_TIPS = [
 # --- FUNÇÕES AUXILIARES RECONSTRUÍDAS ---
 
 def parse_monetary_value(text):
-    """Extrai o primeiro valor monetário de uma string de forma segura."""
+    """
+    Extrai o primeiro valor monetário de uma string de forma segura e robusta.
+    Lida com formatos como '2.440', '1.234,56' e '50,00'.
+    """
     if not isinstance(text, str): return None
-    pattern = r'(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d+\.\d{2}|\d+)'
+    # Padrão regex para encontrar valores monetários de forma flexível
+    pattern = r'(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*(?:,\d{2})?|\d+(?:,\d{2})?|\d+\.\d{2})'
     match = re.search(pattern, text)
     if not match: return None
+    
+    value_str = match.group(1)
     try:
-        return float(match.group(1).replace('.', '').replace(',', '.'))
+        # Lógica para tratar separadores de milhar e decimal
+        if ',' in value_str and '.' in value_str:
+            # Ex: 1.234,56 -> 1234.56
+            cleaned_value = value_str.replace('.', '').replace(',', '.')
+        elif ',' in value_str:
+            # Ex: 1234,56 -> 1234.56
+            cleaned_value = value_str.replace(',', '.')
+        elif '.' in value_str:
+            parts = value_str.split('.')
+            # Ex: 2.440 (milhar) -> 2440 | Ex: 24.40 (decimal) -> 24.40
+            if len(parts[-1]) == 3 and len(parts) > 1:
+                cleaned_value = value_str.replace('.', '')
+            else:
+                cleaned_value = value_str
+        else:
+            # Ex: 500 -> 500
+            cleaned_value = value_str
+            
+        return float(cleaned_value)
     except (ValueError, IndexError):
         return None
 
 def extract_all_transactions_intelligent(text):
-    """
-    FUNÇÃO RECONSTRUÍDA: Divide a frase em cláusulas e extrai uma transação de cada.
-    """
+    """Divide a frase em cláusulas e extrai uma transação de cada."""
     transactions = []
-    # Divide a frase por conectores como 'e', ',', 'depois'
     clauses = re.split(r'\s+e\s+|\s*,\s*|\s+depois\s+', text)
     
     for clause in clauses:
@@ -153,17 +175,15 @@ def extract_due_date(text):
     return match.group(0) if match else "Sem data"
 
 def clean_description(text, value):
-    """
-    FUNÇÃO DE LIMPEZA DRÁSTICAMENTE MELHORADA: Isola o sujeito da transação.
-    """
+    """Isola o sujeito da transação de forma mais precisa."""
     # Remove o valor monetário exato para não ser confundido com a descrição
     if value is not None:
+        value_int = int(value)
         # Formata o valor com ponto como separador de milhar e vírgula para decimal
         formatted_value_br = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         text = text.replace(formatted_value_br, "")
-        # Remove também o valor sem formatação
-        text = text.replace(f"{value:.2f}", "")
-        text = text.replace(str(int(value)), "")
+        text = text.replace(str(value), "")
+        text = text.replace(str(value_int), "")
 
     # Remove frases e palavras de "ruído"
     noise_patterns = [
@@ -212,9 +232,7 @@ def get_balance(user_id):
     return 0.0
 
 def set_balance(user_id, new_balance):
-    """
-    NOVA FUNÇÃO: Define ou sobrescreve o saldo do usuário.
-    """
+    """Define ou sobrescreve o saldo do usuário."""
     lines = []; user_found = False
     if os.path.exists(CSV_SALDO):
         with open(CSV_SALDO, 'r', encoding='utf-8') as file: lines = file.readlines()
@@ -232,6 +250,7 @@ def set_balance(user_id, new_balance):
         if not user_found: file.write(f"{user_id};{new_balance:.2f}\n")
 
 def record_expense(user_id, value, description, update=True):
+    """Registra um gasto e retorna um dicionário com os detalhes."""
     now = datetime.datetime.now(TIMEZONE)
     now_str_db = now.strftime("%Y-%m-%d %H:%M:%S")
     category = infer_category(description)
@@ -241,7 +260,7 @@ def record_expense(user_id, value, description, update=True):
         if update:
             current_balance = get_balance(user_id)
             set_balance(user_id, current_balance - value)
-        return f"- {description}: *R${value:.2f}* ({category})"
+        return {"description": description, "value": value, "category": category}
     return None
 
 def record_income(user_id, value, description):
@@ -459,8 +478,9 @@ def process_message(user_id, user_name, message_text):
         for trans in transactions:
             value = trans['value']
             description = clean_description(trans['context'], value)
-            result_line = record_expense(user_id, value, description, update=False)
-            if result_line:
+            result_dict = record_expense(user_id, value, description, update=False)
+            if result_dict:
+                result_line = f"- {result_dict['description']}: *R${result_dict['value']:.2f}* ({result_dict['category']})"
                 response_lines.append(result_line)
                 total_value += value
         
@@ -477,8 +497,17 @@ def process_message(user_id, user_name, message_text):
         if any(keyword in message_text for keyword in income_keywords):
             if not description: description = "Entrada"
             return record_income(user_id, value, description)
-            
-        return record_expense(user_id, value, description)
+        
+        # LÓGICA DE RESPOSTA DE GASTO ÚNICO CORRIGIDA
+        result = record_expense(user_id, value, description)
+        if result:
+            today_str_msg = datetime.datetime.now(TIMEZONE).strftime("%d/%m")
+            current_balance = get_balance(user_id)
+            return (
+                f"✅ Gasto registrado em {today_str_msg}!\n"
+                f"- {result['description']}: *R${result['value']:.2f}* ({result['category']})\n\n"
+                f"Seu novo saldo é *R${current_balance:.2f}*."
+            )
 
     # 6. Se nada correspondeu, retorna mensagem de ajuda
     return f"Não entendi, {user_name}. 🤔\n\n- Para *gastos*, tente: `gastei 20 no lanche`\n- Para *dívidas*, tente: `conta de luz 150 vence 10/09`\n- Para *entradas*, tente: `recebi 500`\n\nPara ver tudo, envie `comandos`."
