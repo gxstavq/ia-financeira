@@ -28,18 +28,47 @@ METAS_FILE_NAME = os.path.join(DATA_DIR, "metas.csv")
 RECORRENTES_FILE_NAME = os.path.join(DATA_DIR, "recorrentes.csv")
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=-3))
 
-# Dicionário de palavras-chave para categorização automática
+# >>> CÓDIGO ALTERADO: Dicionário de palavras-chave expandido para maior inteligência
 CATEGORY_KEYWORDS = {
-    "Alimentação": ["restaurante", "almoço", "janta", "ifood", "rappi", "mercado", "comida", "lanche", "pizza", "hamburguer"],
-    "Transporte": ["uber", "99", "táxi", "gasolina", "metrô", "ônibus", "passagem", "estacionamento", "escritorio"],
-    "Moradia": ["aluguel", "condomínio", "luz", "água", "internet", "gás", "iptu"],
-    "Lazer": ["cinema", "show", "bar", "festa", "viagem", "streaming", "spotify", "netflix", "jogo"],
-    "Saúde": ["farmácia", "remédio", "médico", "consulta", "plano", "academia", "suplemento"],
-    "Compras": ["roupas", "presente", "shopping", "online", "eletrônicos"],
-    "Educação": ["curso", "livro", "faculdade", "material"],
-    "Essenciais": ["aluguel", "condomínio", "luz", "água", "internet", "gás", "iptu", "mercado", "farmácia", "plano", "metrô", "ônibus"],
-    "Desejos": ["restaurante", "ifood", "rappi", "lanche", "pizza", "cinema", "show", "bar", "festa", "viagem", "streaming", "jogo", "roupas", "presente", "shopping", "uber", "99", "táxi"]
+    "Alimentação": [
+        "restaurante", "almoço", "janta", "ifood", "rappi", "mercado", "comida", "lanche", 
+        "pizza", "hamburguer", "padaria", "café", "sorvete", "açaí", "supermercado"
+    ],
+    "Transporte": [
+        "uber", "99", "táxi", "gasolina", "metrô", "ônibus", "passagem", "estacionamento", 
+        "escritorio", "combustível", "pedágio", "rodízio"
+    ],
+    "Moradia": [
+        "aluguel", "condomínio", "luz", "água", "internet", "gás", "iptu", "diarista", 
+        "limpeza", "reforma", "manutenção"
+    ],
+    "Lazer": [
+        "cinema", "show", "bar", "festa", "viagem", "streaming", "spotify", "netflix", 
+        "jogo", "ingresso", "passeio", "clube", "hobby"
+    ],
+    "Saúde": [
+        "farmácia", "remédio", "médico", "consulta", "plano", "academia", "suplemento", 
+        "dentista", "exame", "terapia"
+    ],
+    "Compras": [
+        "roupa", "roupas", "tênis", "sapato", "presente", "shopping", "online", "eletrônicos", 
+        "celular", "computador", "acessório", "decoração", "livraria"
+    ],
+    "Educação": [
+        "curso", "livro", "faculdade", "material", "escola", "aula", "palestra"
+    ],
+    # Categorias para o Orçamento 50/30/20 (também expandidas)
+    "Essenciais": [
+        "aluguel", "condomínio", "luz", "água", "internet", "gás", "iptu", "mercado", 
+        "farmácia", "plano", "metrô", "ônibus", "combustível", "faculdade", "escola"
+    ],
+    "Desejos": [
+        "restaurante", "ifood", "rappi", "lanche", "pizza", "cinema", "show", "bar", 
+        "festa", "viagem", "streaming", "jogo", "roupas", "tênis", "presente", "shopping", 
+        "uber", "99", "táxi", "hobby"
+    ]
 }
+# FIM DA ALTERAÇÃO <<<
 
 # Mensagem de ajuda mais humana e com novos comandos
 COMMANDS_MESSAGE = """
@@ -91,28 +120,17 @@ def parse_value_string(s):
         s = s.replace(',', '')
     return float(s)
 
-# >>> NOVO CÓDIGO: Função mais inteligente para extrair o valor monetário de uma frase
 def extract_monetary_value(text):
-    """
-    Usa regex para encontrar o valor monetário mais provável numa frase.
-    Lida com formatos como 2.500,08, 1500, 25,50.
-    Retorna o valor como float e a string original do valor.
-    """
-    # Regex para encontrar números com separadores de milhar e decimais
     pattern = r'\b\d{1,3}(?:\.?\d{3})*(?:,\d{2})?\b|\b\d+(?:,\d{2})?\b'
     matches = re.findall(pattern, text)
-    
     if not matches:
         return None, None
-
-    # O valor mais provável é o último número encontrado na frase
     value_str = matches[-1]
     try:
         value_float = parse_value_string(value_str)
         return value_float, value_str
     except (ValueError, IndexError):
         return None, None
-# FIM DO NOVO CÓDIGO <<<
 
 def infer_category(description):
     for category, keywords in CATEGORY_KEYWORDS.items():
@@ -364,14 +382,12 @@ def webhook():
             elif "apagar último" in message_text or "excluir último" in message_text:
                 reply_message = delete_last_expense(user_id)
             
-            # >>> CÓDIGO ALTERADO: Lógica para diferenciar pagamento de gasto
             elif any(keyword in message_text for keyword in ["pagamento", "recebi", "salário"]):
                 value, value_str = extract_monetary_value(message_text)
                 if value:
                     reply_message = record_payment_and_update_balance(user_id, value)
                 else:
                     reply_message = "Entendi que é um pagamento, mas não consegui identificar o valor. Tente de novo, por favor."
-            # FIM DA ALTERAÇÃO <<<
 
             else:
                 value, value_str = extract_monetary_value(message_text)
