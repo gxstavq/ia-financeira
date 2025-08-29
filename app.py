@@ -402,7 +402,7 @@ def webhook():
                 values = extract_all_monetary_values(message_text)
                 date = extract_date(message_text)
                 if values:
-                    description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', message_text).strip()
+                    description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', message_text).strip()
                     description = re.sub(r'vence dia.*|dívida|parcela', '', description).strip()
                     reply_message = save_debt_to_csv(user_id, values[0], description.capitalize(), date=date if date else "Sem data")
                 else:
@@ -417,7 +417,7 @@ def webhook():
                     reply_message = set_balance(user_id, total_balance)
                 else:
                     payment_value = max(values)
-                    description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{1,2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', message_text).strip()
+                    description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', message_text).strip()
                     reply_message = record_payment_and_update_balance(user_id, payment_value, description.capitalize())
 
             # 3. Fallback: Se não for nada acima, assume que é um gasto
@@ -425,11 +425,15 @@ def webhook():
                 values = extract_all_monetary_values(message_text)
                 if values:
                     value = values[0]
-                    description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{1,2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', message_text).strip()
+                    description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', message_text).strip()
                     description = re.sub(r'^(de|da|do|no|na)\s', '', description)
                     if not description:
-                        reply_message = "Parece que você enviou um valor sem descrição. Tente de novo, por favor."
-                    else:
+                        if "perdi" in message_text:
+                            description = "Perda"
+                        else:
+                            reply_message = "Parece que você enviou um valor sem descrição. Tente de novo, por favor."
+                    
+                    if description:
                         category = save_expense_to_csv(user_id, description.capitalize(), value)
                         record_expense_and_update_balance(user_id, value)
                         today_str = datetime.datetime.now(TIMEZONE).strftime("%d/%m")
