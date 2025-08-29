@@ -58,7 +58,7 @@ CATEGORY_KEYWORDS = {
         "bermuda", "short", "saia", "vestido", "casaco", "jaqueta", "moletom", "terno", "blazer", "gravata",
         "meia", "cueca", "calcinha", "sutiã", "pijama", "biquíni", "sunga", "maiô", "acessório", "bolsa",
         "carteira", "cinto", "chapéu", "boné", "gorro", "cachecol", "luva", "óculos", "relógio", "joia",
-        "brinco", "colar", "pulseira", "anel", "maquiagem", "batom", "base", "rímel", "perfume", "creme",
+        "brinco", "colar", "pulseira", "anel", "maquilhagem", "batom", "base", "rímel", "perfume", "creme",
         "cosméticos", "lavanderia", "costureira", "ajuste de roupa", "sapataria"
     ],
     "Lazer": [
@@ -129,39 +129,46 @@ def parse_monetary_value(text):
     Lida com formatos como '2.440', '1.234,56' e '50,00'.
     """
     if not isinstance(text, str): return None
-    # Padrão regex para encontrar valores monetários de forma flexível
-    pattern = r'(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*(?:,\d{2})?|\d+(?:,\d{2})?|\d+\.\d{2})'
+    # Padrão regex mais robusto para capturar vários formatos numéricos brasileiros.
+    pattern = r'(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d+\.\d{2}|\d{1,3}(?:\.\d{3})*|\d+)'
     match = re.search(pattern, text)
     if not match: return None
     
     value_str = match.group(1)
-    try:
-        # Lógica para tratar separadores de milhar e decimal
-        if ',' in value_str and '.' in value_str:
-            # Ex: 1.234,56 -> 1234.56
-            cleaned_value = value_str.replace('.', '').replace(',', '.')
-        elif ',' in value_str:
-            # Ex: 1234,56 -> 1234.56
-            cleaned_value = value_str.replace(',', '.')
-        elif '.' in value_str:
-            parts = value_str.split('.')
-            # Ex: 2.440 (milhar) -> 2440 | Ex: 24.40 (decimal) -> 24.40
-            if len(parts[-1]) == 3 and len(parts) > 1:
-                cleaned_value = value_str.replace('.', '')
-            else:
-                cleaned_value = value_str
+    
+    # Lógica aprimorada para interpretar corretamente os separadores
+    if ',' in value_str and '.' in value_str:
+        # Formato: 1.234,56 -> remove '.' e troca ',' por '.'
+        cleaned_value = value_str.replace('.', '').replace(',', '.')
+    elif ',' in value_str:
+        # Formato: 1234,56 ou 2,900 -> Se a parte depois da vírgula tiver 3 dígitos, é milhar
+        parts = value_str.split(',')
+        if len(parts[-1]) == 3:
+             cleaned_value = value_str.replace(',', '')
         else:
-            # Ex: 500 -> 500
+             cleaned_value = value_str.replace(',', '.')
+    elif '.' in value_str:
+        parts = value_str.split('.')
+        # Se a parte depois do último ponto tiver 3 dígitos, é milhar (ex: 2.900)
+        if len(parts[-1]) == 3 and len(parts) > 1:
+            cleaned_value = value_str.replace('.', '')
+        else: # É um decimal (ex: 29.90)
             cleaned_value = value_str
+    else:
+        # É um inteiro (ex: 2900)
+        cleaned_value = value_str
             
+    try:
         return float(cleaned_value)
     except (ValueError, IndexError):
         return None
 
+
 def extract_all_transactions_intelligent(text):
-    """Divide a frase em cláusulas e extrai uma transação de cada."""
+    """Divide a frase em cláusulas e extrai uma transação de cada, sem quebrar números."""
     transactions = []
-    clauses = re.split(r'\s+e\s+|\s*,\s*|\s+depois\s+', text)
+    # Regex atualizado para não dividir em uma vírgula seguida por 3 dígitos (evita quebrar milhares como 2,900)
+    clauses = re.split(r'\s+e\s+|\s+depois\s+|,\s*(?!\d{3})', text)
     
     for clause in clauses:
         value = parse_monetary_value(clause)
