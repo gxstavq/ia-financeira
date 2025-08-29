@@ -9,6 +9,7 @@ import csv
 import re
 import random
 from collections import defaultdict
+from flask import Flask # <-- CORREÇÃO AQUI
 
 # --- CONFIGURAÇÃO DA APLICAÇÃO FLASK ---
 app = Flask(__name__)
@@ -205,7 +206,7 @@ def update_balance(user_id, new_balance):
 
 def record_expense(user_id, value, description):
     """Registra um novo gasto e atualiza o saldo."""
-    now_str = datetime.datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+    now_str = datetime.datetime.now(TIMEZONE).strftime("%Y-m-%d %H:%M:%S")
     category = infer_category(description)
     
     header = ["UserID", "DataHora", "Descricao", "Valor", "Categoria"]
@@ -220,7 +221,7 @@ def record_expense(user_id, value, description):
 
 def record_income(user_id, value, description):
     """Registra uma nova entrada e atualiza o saldo."""
-    now_str = datetime.datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+    now_str = datetime.datetime.now(TIMEZONE).strftime("%Y-m-%d %H:%M:%S")
     
     header = ["UserID", "DataHora", "Descricao", "Valor"]
     row = [user_id, now_str, description, f"{value:.2f}"]
@@ -288,7 +289,7 @@ def get_period_report(user_id, period):
     elif period == "mês":
         start_date = now.date().replace(day=1)
         period_name = "neste mês"
-        report_lines.append(f"🧾 *Seus gastos {period_name}* �\n")
+        report_lines.append(f"🧾 *Seus gastos {period_name}* 🧾\n")
 
     with open(CSV_GASTOS, 'r', encoding='utf-8') as file:
         reader = csv.reader(file, delimiter=';')
@@ -296,7 +297,7 @@ def get_period_report(user_id, period):
         for row in reader:
             if row and row[0] == user_id:
                 try:
-                    expense_date = datetime.datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S").date()
+                    expense_date = datetime.datetime.strptime(row[1], "%Y-m-%d %H:%M:%S").date()
                     if expense_date >= start_date:
                         description, value = row[2], float(row[3])
                         report_lines.append(f"- {description}: R${value:.2f}")
@@ -330,7 +331,7 @@ def get_io_summary(user_id, period):
             for row in reader:
                 if row and row[0] == user_id:
                     try:
-                        if datetime.datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S").date() >= start_date:
+                        if datetime.datetime.strptime(row[1], "%Y-m-%d %H:%M:%S").date() >= start_date:
                             total_out += float(row[3])
                     except (ValueError, IndexError): continue
     
@@ -341,7 +342,7 @@ def get_io_summary(user_id, period):
             for row in reader:
                 if row and row[0] == user_id:
                     try:
-                        if datetime.datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S").date() >= start_date:
+                        if datetime.datetime.strptime(row[1], "%Y-m-%d %H:%M:%S").date() >= start_date:
                             total_in += float(row[3])
                     except (ValueError, IndexError): continue
     
