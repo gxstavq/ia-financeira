@@ -9,7 +9,7 @@ import csv
 import re
 import random
 from collections import defaultdict
-from flask import Flask, request # <-- CORREÇÃO AQUI
+from flask import Flask, request
 
 # --- CONFIGURAÇÃO DA APLICAÇÃO FLASK ---
 app = Flask(__name__)
@@ -95,6 +95,9 @@ def parse_monetary_value(text):
 
     # Remove R$ e espaços extras para facilitar a análise
     text = text.replace('r$', '').strip()
+    
+    # <-- CORREÇÃO AQUI: Remove palavras que podem confundir a extração de números
+    text = re.sub(r'\b(deu|custou|foi de)\b', '', text)
 
     # Regex para encontrar números nos formatos mais comuns no Brasil
     # Prioriza números com vírgula como decimal
@@ -128,7 +131,7 @@ def clean_description(text, value):
     
     # Remove palavras comuns de comando
     keywords_to_remove = [
-        'gastei', 'gasto', 'custou', 'foi', 'em', 'no', 'na', 'com', 'de', 'da', 'do',
+        'gastei', 'gasto', 'custou', 'foi', 'em', 'no', 'na', 'com', 'de', 'da', 'do', 'deu',
         'recebi', 'pagamento', 'salário', 'ganhei', 'rendimento',
         'dívida', 'conta', 'vence', 'vencimento', 'paguei', 'apagar', 'último',
         'r$'
@@ -206,7 +209,7 @@ def update_balance(user_id, new_balance):
 
 def record_expense(user_id, value, description):
     """Registra um novo gasto e atualiza o saldo."""
-    now_str = datetime.datetime.now(TIMEZONE).strftime("%Y-m-%d %H:%M:%S")
+    now_str = datetime.datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
     category = infer_category(description)
     
     header = ["UserID", "DataHora", "Descricao", "Valor", "Categoria"]
@@ -221,7 +224,7 @@ def record_expense(user_id, value, description):
 
 def record_income(user_id, value, description):
     """Registra uma nova entrada e atualiza o saldo."""
-    now_str = datetime.datetime.now(TIMEZONE).strftime("%Y-m-%d %H:%M:%S")
+    now_str = datetime.datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
     
     header = ["UserID", "DataHora", "Descricao", "Valor"]
     row = [user_id, now_str, description, f"{value:.2f}"]
@@ -297,7 +300,7 @@ def get_period_report(user_id, period):
         for row in reader:
             if row and row[0] == user_id:
                 try:
-                    expense_date = datetime.datetime.strptime(row[1], "%Y-m-%d %H:%M:%S").date()
+                    expense_date = datetime.datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S").date()
                     if expense_date >= start_date:
                         description, value = row[2], float(row[3])
                         report_lines.append(f"- {description}: R${value:.2f}")
@@ -331,7 +334,7 @@ def get_io_summary(user_id, period):
             for row in reader:
                 if row and row[0] == user_id:
                     try:
-                        if datetime.datetime.strptime(row[1], "%Y-m-%d %H:%M:%S").date() >= start_date:
+                        if datetime.datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S").date() >= start_date:
                             total_out += float(row[3])
                     except (ValueError, IndexError): continue
     
@@ -342,7 +345,7 @@ def get_io_summary(user_id, period):
             for row in reader:
                 if row and row[0] == user_id:
                     try:
-                        if datetime.datetime.strptime(row[1], "%Y-m-%d %H:%M:%S").date() >= start_date:
+                        if datetime.datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S").date() >= start_date:
                             total_in += float(row[3])
                     except (ValueError, IndexError): continue
     
@@ -388,12 +391,13 @@ def process_message(user_id, user_name, message_text):
     if any(word in message_text for word in ["ajuda", "comandos", "menu", "começar"]):
         return COMMANDS_MESSAGE
     
-    if any(word in message_text for word in ["oi", "olá", "bom dia", "boa tarde", "boa noite"]):
+    # <-- CORREÇÃO AQUI: A saudação agora é tratada de forma mais específica para não ser confundida.
+    greetings = ["oi", "olá", "bom dia", "boa tarde", "boa noite", "e aí", "opa"]
+    if message_text.strip() in greetings:
         return f"Olá, {user_name}! Como posso te ajudar a controlar suas finanças hoje? Se precisar, digite 'comandos' para ver as opções. 😊"
 
     if "saldo" in message_text:
-        balance = get_balance(user_id)
-        return f"💵 Seu saldo atual é de *R${balance:.2f}*."
+        return f"💵 Seu saldo atual é de *R${get_balance(user_id):.2f}*."
 
     if "apagar último" in message_text or "excluir último" in message_text:
         return delete_last_expense(user_id)
