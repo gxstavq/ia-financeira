@@ -7,8 +7,8 @@ import os
 import csv
 import re  # Importado para a análise de texto
 import random  # Importado para as dicas financeiras
+import unicodedata  # Para normalizar texto (tirar acentos)
 from collections import defaultdict
-import unicodedata
 
 # Cria a aplicação
 app = Flask(__name__)
@@ -75,70 +75,118 @@ Aqui estão alguns dos comandos que eu entendo:
 """
 
 # --------------------
-# UTILITÁRIAS / NORMALIZAÇÃO
+# Utilitários
 # --------------------
+
 def normalize_text(s: str) -> str:
-    """Minúsculas, remove acentos e espaços extras."""
-    s = (s or "").lower().strip()
+    """Remove acentos, transforma em minúsculas e limpa espaços extras."""
+    if not isinstance(s, str): return ""
+    s = s.strip().lower()
     s = ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
     s = re.sub(r'\s+', ' ', s)
     return s
 
-def contains_any(text: str, patterns) -> bool:
-    """Checa se qualquer padrão (string) está presente em text."""
+def contains_any(s: str, patterns) -> bool:
+    """Verifica se alguma string ou regex na lista aparece em s (s já deve ser normalizado)."""
     for p in patterns:
-        if isinstance(p, str) and p in text:
-            return True
+        if isinstance(p, str):
+            if p in s:
+                return True
+        else:
+            # assume regex
+            try:
+                if p.search(s):
+                    return True
+            except Exception:
+                pass
     return False
 
+# Função centralizada para atualizar o arquivo de saldo
+def _write_balance_file(balance_map: dict):
+    """Escreve o mapa de saldos no arquivo SALDO_FILE_NAME com cabeçalho."""
+    os.makedirs(os.path.dirname(SALDO_FILE_NAME) or '.', exist_ok=True)
+    with open(SALDO_FILE_NAME, 'w', encoding='utf-8') as f:
+        f.write("UserID;Saldo\n")
+        for uid, bal in balance_map.items():
+            f.write(f"{uid};{float(bal):.2f}\n")
+
+def _read_balance_file() -> dict:
+    """Lê o arquivo de saldos e retorna um dict {user_id: saldo}."""
+    balances = {}
+    if not os.path.exists(SALDO_FILE_NAME):
+        return balances
+    with open(SALDO_FILE_NAME, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f, delimiter=';')
+        next(reader, None)  # pula cabeçalho se existir
+        for row in reader:
+            if not row: continue
+            try:
+                uid = row[0]
+                bal = float(row[1]) if len(row) > 1 and row[1] != '' else 0.0
+                balances[uid] = bal
+            except Exception:
+                continue
+    return balances
+
 # --------------------
-# PARSERS E EXTRAÇÃO
+# Parsing de valores (robusto)
 # --------------------
-# >>> CÓDIGO ALTERADO: Função de parsing de valores reconstruída para máxima precisão
 def parse_value_string(s):
     """
-    Aceita formatos:
-      - BR: 1.234,56 ou 123,45 ou 2900
-      - EN: 1,234.56 ou 123.45
-    Garante que '2900' -> 2900.0 (não 290.0).
+    Converte strings numéricas em float com suporte a formatos BR/EN:
+      - 2900 -> 2900.0
+      - 2.900 -> 2900.0
+      - 2.900,00 -> 2900.0
+      - 1,234.56 -> 1234.56
+      - 1234,56 -> 1234.56
     """
-    if s is None:
-        raise ValueError("Valor inválido")
     if not isinstance(s, str):
         return float(s)
-
     s = s.strip()
-    # remove R$ e espaços
-    s = s.replace('R$', '').replace('r$', '').strip()
+    # remove moedas e espaços
+    s = s.replace('R$', '').replace('$', '').strip()
 
-    # apenas dígitos -> inteiro
-    if re.fullmatch(r'\d+', s):
+    # se tem letras, tira tudo exceto dígitos e separadores
+    s = re.sub(r'[^\d,.-]', '', s)
+
+    # casos com ambos separadores
+    if ',' in s and '.' in s:
+        # decide pelo último separador (virgula ou ponto)
+        if s.rfind(',') > s.rfind('.'):
+            # formato BR: 1.234,56 -> remove pontos, troca vírgula por ponto
+            s = s.replace('.', '').replace(',', '.')
+        else:
+            # formato EN: 1,234.56 -> remove vírgulas
+            s = s.replace(',', '')
+    elif ',' in s:
+        # apenas vírgula: geralmente decimal no BR
+        s = s.replace('.', '').replace(',', '.')
+    elif '.' in s:
+        # apenas ponto: pode ser decimal (ex 123.45) ou milhar (ex 2.900)
+        parts = s.split('.')
+        if len(parts) > 1 and len(parts[-1]) == 3:
+            # provavelmente milhar
+            s = s.replace('.', '')
+        # caso contrário mantém o ponto como decimal
+
+    # fallback final
+    try:
         return float(s)
-
-    # BR: 1.234,56  ou 123,45
-    if re.fullmatch(r'\d{1,3}(?:\.\d{3})*,\d{2}', s) or re.fullmatch(r'\d+,\d{2}', s):
-        return float(s.replace('.', '').replace(',', '.'))
-
-    # EN: 1,234.56  ou 123.45
-    if re.fullmatch(r'\d{1,3}(?:,\d{3})*\.\d{2}', s):
-        return float(s.replace(',', ''))
-
-    # milhar com pontos sem decimais: 2.900 -> 2900
-    if re.fullmatch(r'\d{1,3}(?:\.\d{3})+', s) and ',' not in s:
-        return float(s.replace('.', ''))
-
-    # fallback: tenta converter trocando vírgula por ponto
-    s_temp = s.replace('.', '').replace(',', '.')
-    return float(s_temp)
+    except Exception:
+        # extrai números e junta (fallback)
+        nums = re.findall(r'\d+', s)
+        if nums:
+            return float(''.join(nums))
+        raise
 
 def extract_all_monetary_values(text):
     """
-    Pega números em formatos BR/EN e inteiros.
-    Ex.: "paguei 2.900,00 e 100" -> [2900.0, 100.0]
+    Extrai valores monetários do texto aceitando múltiplos formatos.
+    Retorna lista de floats.
     """
-    if not text:
+    if not isinstance(text, str):
         return []
-    # reconhece: 1.234,56 | 123,45 | 1,234.56 | 123.45 | 2900
+    # procura formatos com separadores ou números simples
     pattern = r'\b(?:\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d{1,3}(?:[.,]\d{3})+|\d+)\b'
     matches = re.findall(pattern, text)
     values = []
@@ -150,23 +198,22 @@ def extract_all_monetary_values(text):
     return values
 
 def extract_date(text):
-    """Extrai dd/mm se houver."""
-    if not text: return None
-    match = re.search(r'(\d{1,2}/\d{1,2})', text)
+    """Extrai data no formato dd/mm ou dd/mm/aaaa se houver."""
+    if not isinstance(text, str): return None
+    match = re.search(r'(\d{1,2}/\d{1,2}(?:/\d{2,4})?)', text)
     if match:
         return match.group(0)
     return None
 
 # --------------------
-# CATEGORIAS E SALVAMENTO
+# Categorias e gravação
 # --------------------
 def infer_category(description):
-    desc = (description or "").lower()
     for category, keywords in CATEGORY_KEYWORDS.items():
         if category in ["Essenciais", "Desejos"]:
             continue
         for keyword in keywords:
-            if keyword in desc:
+            if keyword in description.lower():
                 return category
     return "Outros"
 
@@ -174,17 +221,12 @@ def save_expense_to_csv(user_id, description, value):
     now = datetime.datetime.datetime.now(TIMEZONE)
     timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
     category = infer_category(description)
+    os.makedirs(os.path.dirname(CSV_FILE_NAME) or '.', exist_ok=True)
     file_exists = os.path.exists(CSV_FILE_NAME)
     expense_id = 1
-    if file_exists:
-        try:
-            with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
-                # conta apenas linhas de dados
-                reader = csv.reader(file, delimiter=';')
-                next(reader, None)
-                expense_id = sum(1 for _ in reader) + 1
-        except Exception:
-            expense_id = 1
+    if file_exists and os.path.getsize(CSV_FILE_NAME) > 0:
+        with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
+            expense_id = sum(1 for line in file)
     new_row = f"{user_id};{expense_id};{timestamp};{description};{value:.2f};{category}\n"
     with open(CSV_FILE_NAME, 'a', encoding='utf-8') as file:
         if not file_exists or os.path.getsize(CSV_FILE_NAME) == 0:
@@ -195,6 +237,7 @@ def save_expense_to_csv(user_id, description, value):
 def save_payment_to_csv(user_id, description, value):
     now = datetime.datetime.datetime.now(TIMEZONE)
     timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    os.makedirs(os.path.dirname(PAGAMENTOS_FILE_NAME) or '.', exist_ok=True)
     file_exists = os.path.exists(PAGAMENTOS_FILE_NAME)
     with open(PAGAMENTOS_FILE_NAME, 'a', encoding='utf-8') as file:
         if not file_exists or os.path.getsize(PAGAMENTOS_FILE_NAME) == 0:
@@ -203,6 +246,7 @@ def save_payment_to_csv(user_id, description, value):
 
 def save_debt_to_csv(user_id, value, description, date="Sem data"):
     new_row = f"{user_id};{date};{description};{value:.2f}\n"
+    os.makedirs(os.path.dirname(DIVIDAS_FILE_NAME) or '.', exist_ok=True)
     file_exists = os.path.exists(DIVIDAS_FILE_NAME)
     with open(DIVIDAS_FILE_NAME, 'a', encoding='utf-8') as file:
         if not file_exists or os.path.getsize(DIVIDAS_FILE_NAME) == 0:
@@ -213,9 +257,6 @@ def save_debt_to_csv(user_id, value, description, date="Sem data"):
     else:
         return f"✅ Dívida registrada: {description} no valor de R${value:.2f} (sem data de vencimento)."
 
-# --------------------
-# DÍVIDAS
-# --------------------
 def get_debts_report(user_id):
     if not os.path.exists(DIVIDAS_FILE_NAME):
         return "Nenhuma dívida registrada ainda."
@@ -225,7 +266,7 @@ def get_debts_report(user_id):
         reader = csv.reader(file, delimiter=';')
         next(reader, None)
         for row in reader:
-            if row and len(row) >= 4 and row[0] == user_id:
+            if row and row[0] == user_id:
                 try:
                     date_due, description, value = row[1], row[2], float(row[3])
                     report_lines.append(f"- {description} (Vence: {date_due}): R${value:.2f}")
@@ -241,72 +282,42 @@ def get_debts_report(user_id):
 def delete_debt_from_csv(user_id, description_to_delete):
     if not os.path.exists(DIVIDAS_FILE_NAME):
         return "Não há dívidas para apagar."
+    lines, debt_found = [], False
     with open(DIVIDAS_FILE_NAME, 'r', encoding='utf-8') as file:
-        reader = csv.reader(file, delimiter=';')
-        header = next(reader, None)
-        rows = list(reader)
-    new_rows = []
-    debt_found = False
-    for row in rows:
-        if (not debt_found) and len(row) >= 4 and row[0] == user_id and description_to_delete.lower() in row[2].lower():
-            debt_found = True
-            continue  # pula esta dívida
-        new_rows.append(row)
+        lines = file.readlines()
     with open(DIVIDAS_FILE_NAME, 'w', encoding='utf-8') as file:
-        if header:
-            file.write(";".join(header) + "\n")
-        for r in new_rows:
-            file.write(";".join(r) + "\n")
+        for line in lines:
+            parts = line.strip().split(';')
+            if not debt_found and len(parts) > 2 and parts[0] == user_id and description_to_delete.lower() in parts[2].lower():
+                debt_found = True
+                # pula esta linha (apagar)
+            else:
+                file.write(line)
     if not debt_found:
         return f"Não encontrei a dívida '{description_to_delete}' para apagar."
     return f"✅ Dívida '{description_to_delete}' paga e removida da sua lista!"
 
 # --------------------
-# SALDO (LEITURA / ESCRITA SEGURA)
+# Saldo (centralizado)
 # --------------------
 def get_current_balance(user_id):
-    if not os.path.exists(SALDO_FILE_NAME):
-        return 0.0
-    with open(SALDO_FILE_NAME, 'r', encoding='utf-8') as file:
-        reader = csv.reader(file, delimiter=';')
-        header = next(reader, None)
-        for row in reader:
-            if row and len(row) >= 2 and row[0] == user_id:
-                try:
-                    return float(row[1])
-                except Exception:
-                    return 0.0
-    return 0.0
+    balances = _read_balance_file()
+    return float(balances.get(user_id, 0.0))
+
+def update_balance(user_id, new_balance):
+    balances = _read_balance_file()
+    balances[user_id] = float(new_balance)
+    _write_balance_file(balances)
 
 def set_balance(user_id, value):
-    balances = {}
-    if os.path.exists(SALDO_FILE_NAME):
-        with open(SALDO_FILE_NAME, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f, delimiter=';')
-            header = next(reader, None)
-            for row in reader:
-                if not row: continue
-                uid = row[0]
-                try:
-                    balances[uid] = float(row[1])
-                except Exception:
-                    balances[uid] = 0.0
-    # atualiza o usuário
-    balances[user_id] = float(value)
-    # reescreve o arquivo com cabeçalho
-    with open(SALDO_FILE_NAME, 'w', encoding='utf-8') as f:
-        f.write("UserID;Saldo\n")
-        for uid, bal in balances.items():
-            f.write(f"{uid};{bal:.2f}\n")
-    return f"✅ Saldo atualizado! Seu novo saldo é de *R${value:.2f}*."
+    update_balance(user_id, value)
+    return f"✅ Saldo atualizado! Seu novo saldo é de *R${float(value):.2f}*."
 
 def record_payment_and_update_balance(user_id, value, description="Pagamento"):
     try:
         current_balance = get_current_balance(user_id)
         new_balance = current_balance + float(value)
-        # Atualiza o saldo
-        set_balance(user_id, new_balance)
-        # Salva pagamento
+        update_balance(user_id, new_balance)
         save_payment_to_csv(user_id, description, value)
         today_str = datetime.datetime.datetime.now(TIMEZONE).strftime("%d/%m")
         return f"✅ Pagamento de R${float(value):.2f} registrado em {today_str}!\n\nSeu saldo atual é de *R${new_balance:.2f}*."
@@ -317,184 +328,159 @@ def record_expense_and_update_balance(user_id, value):
     try:
         current_balance = get_current_balance(user_id)
         new_balance = current_balance - float(value)
-        set_balance(user_id, new_balance)
+        update_balance(user_id, new_balance)
         return True
     except Exception:
         return False
 
 # --------------------
-# RELATÓRIOS (Entradas / Saídas / Períodos)
+# Relatórios (entradas/saídas, períodos)
 # --------------------
 def _period_bounds(period: str):
     now = datetime.datetime.datetime.now(TIMEZONE)
-    if period == "dia":
-        return ("hoje", now.strftime("%Y-%m-%d"), None)  # name, start_str, start_date
-    if period == "semana":
+    period = normalize_text(period or "")
+    if period in ["dia", "hoje"]:
+        return ("hoje", now.strftime("%Y-%m-%d"), None)
+    if period in ["semana", "semana atual", "na semana"]:
         start = (now.date() - datetime.timedelta(days=now.weekday()))
         return ("na semana", None, start)
-    if period == "mês" or period == "mes":
+    if period in ["mês", "mes", "no mes", "no mês"]:
         return ("no mês", now.strftime("%Y-%m"), None)
-    return ("", None, None)
+    # padrão: dia
+    return ("hoje", now.strftime("%Y-%m-%d"), None)
 
 def get_io_summary(user_id, period):
-    nome, start_str, start_date = _period_bounds(period)
-    total_in = 0.0
-    total_out = 0.0
+    period_name, start_str, start_date = _period_bounds(period)
+    total_in, total_out = 0.0, 0.0
 
-    # Saídas (meus_gastos.csv)
     if os.path.exists(CSV_FILE_NAME):
         with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
             reader = csv.reader(file, delimiter=';')
             next(reader, None)
             for row in reader:
-                if not row or len(row) < 5: continue
-                if row[0] != user_id: continue
-                timestamp = row[2]  # yyyy-mm-dd HH:MM:SS
-                try:
-                    value = float(row[4])
-                except Exception:
-                    continue
-                if start_date:
+                if row and row[0] == user_id:
                     try:
-                        row_date = datetime.datetime.strptime(timestamp.split(' ')[0], "%Y-%m-%d").date()
-                        if row_date >= start_date:
-                            total_out += value
+                        timestamp = row[2]  # yyyy-mm-dd HH:MM:SS
+                        value = float(row[4])
                     except Exception:
                         continue
-                elif start_str:
-                    if timestamp.startswith(start_str):
-                        total_out += value
+                    if start_date:
+                        if datetime.datetime.datetime.strptime(timestamp[:10], "%Y-%m-%d").date() >= start_date:
+                            total_out += value
+                    else:
+                        if timestamp.startswith(start_str):
+                            total_out += value
 
-    # Entradas (pagamentos.csv)
     if os.path.exists(PAGAMENTOS_FILE_NAME):
         with open(PAGAMENTOS_FILE_NAME, 'r', encoding='utf-8') as file:
             reader = csv.reader(file, delimiter=';')
             next(reader, None)
             for row in reader:
-                if not row or len(row) < 4: continue
-                if row[0] != user_id: continue
-                timestamp = row[1]
-                try:
-                    value = float(row[3])
-                except Exception:
-                    continue
-                if start_date:
+                if row and row[0] == user_id:
                     try:
-                        row_date = datetime.datetime.strptime(timestamp.split(' ')[0], "%Y-%m-%d").date()
-                        if row_date >= start_date:
-                            total_in += value
+                        timestamp = row[1]
+                        value = float(row[3])
                     except Exception:
                         continue
-                elif start_str:
-                    if timestamp.startswith(start_str):
-                        total_in += value
+                    if start_date:
+                        if datetime.datetime.datetime.strptime(timestamp[:10], "%Y-%m-%d").date() >= start_date:
+                            total_in += value
+                    else:
+                        if timestamp.startswith(start_str):
+                            total_in += value
 
-    return f"💸 *Balanço {nome}*\n\n- Entradas: *R${total_in:.2f}*\n- Saídas: *R${total_out:.2f}*"
+    return f"💸 *Balanço {period_name}*\n\n- Entradas: *R${total_in:.2f}*\n- Saídas: *R${total_out:.2f}*"
 
 def get_period_report(user_id, period):
     if not os.path.exists(CSV_FILE_NAME):
         return "Nenhum gasto registrado ainda."
     total = 0.0
-    nome, start_str, start_date = _period_bounds(period)
-    report_lines = [f"🧾 Seus gastos {nome} 🧾\n"]
+    period_name, start_str, start_date = _period_bounds(period)
+    report_lines = [f"🧾 Seus gastos {period_name} 🧾\n"]
     with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
         reader = csv.reader(file, delimiter=';')
         next(reader, None)
         for row in reader:
-            if not row or len(row) < 5: continue
-            if row[0] != user_id: continue
-            timestamp = row[2]
-            description = row[3]
-            try:
-                value = float(row[4])
-            except Exception:
-                continue
-            match = False
-            if start_date:
+            if row and row[0] == user_id:
                 try:
-                    row_date = datetime.datetime.strptime(timestamp.split(' ')[0], "%Y-%m-%d").date()
-                    if row_date >= start_date:
-                        match = True
+                    timestamp = row[2]
+                    value = float(row[4])
+                    description = row[3]
                 except Exception:
-                    match = False
-            elif start_str:
-                if timestamp.startswith(start_str):
-                    match = True
-            if match:
-                report_lines.append(f"- {description}: R${value:.2f}")
-                total += value
+                    continue
+                match = False
+                if start_date:
+                    if datetime.datetime.datetime.strptime(timestamp[:10], "%Y-%m-%d").date() >= start_date:
+                        match = True
+                else:
+                    if timestamp.startswith(start_str):
+                        match = True
+                if match:
+                    report_lines.append(f"- {description}: R${value:.2f}")
+                    total += value
     if len(report_lines) == 1:
-        return f"Nenhum gasto registrado {nome}."
+        return f"Nenhum gasto registrado {period_name}."
     report_lines.append(f"\n*Total gasto: R${total:.2f}*")
     return "\n".join(report_lines)
 
 # --------------------
-# DELETA ÚLTIMO GASTO
+# Ações de edição/remoção
 # --------------------
 def delete_last_expense(user_id):
     if not os.path.exists(CSV_FILE_NAME):
         return "Não há gastos para apagar."
     with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
-        reader = csv.reader(file, delimiter=';')
-        header = next(reader, None)
-        rows = list(reader)
-    # procura última linha do usuário
-    idx_to_remove = -1
-    for i in range(len(rows)-1, -1, -1):
-        try:
-            if rows[i][0] == user_id:
-                idx_to_remove = i
-                break
-        except Exception:
-            continue
-    if idx_to_remove == -1:
+        lines = file.readlines()
+    last_expense_of_user = -1
+    # percorre do final, pula cabeçalho (index 0)
+    for i in range(len(lines) - 1, 0, -1):
+        parts = lines[i].strip().split(';')
+        if parts and parts[0] == user_id:
+            last_expense_of_user = i
+            break
+    if last_expense_of_user == -1:
         return "Você não tem gastos registados para apagar."
-    deleted = rows.pop(idx_to_remove)
-    # reescreve arquivo
-    with open(CSV_FILE_NAME, 'w', encoding='utf-8') as file:
-        if header:
-            file.write(";".join(header) + "\n")
-        for r in rows:
-            file.write(";".join(r) + "\n")
+    deleted_line = lines.pop(last_expense_of_user).strip().split(';')
     try:
-        deleted_description = deleted[3]
-        deleted_value = float(deleted[4])
+        deleted_description, deleted_value = deleted_line[3], float(deleted_line[4])
     except Exception:
-        deleted_description = deleted[3] if len(deleted) > 3 else "Descrição desconhecida"
-        deleted_value = 0.0
-    # devolve o valor ao saldo
-    record_payment_and_update_balance(user_id, deleted_value, description=f"Reembolso (apagar gasto): {deleted_description}")
+        deleted_description, deleted_value = deleted_line[3] if len(deleted_line) > 3 else "Despesa", 0.0
+    with open(CSV_FILE_NAME, 'w', encoding='utf-8') as file:
+        file.writelines(lines)
+    # devolve o valor ao saldo (registrando como pagamento)
+    record_payment_and_update_balance(user_id, deleted_value, f"Reembolso: {deleted_description}")
     return f"🗑️ Último gasto apagado!\n- Descrição: {deleted_description}\n- Valor: R${deleted_value:.2f}"
 
 # --------------------
-# RESUMOS E UTILIDADES
+# Resumo financeiro e outros utilitários
 # --------------------
 def get_financial_summary(user_id):
     balance = get_current_balance(user_id)
     return f"💰 *Resumo Financeiro*\nSeu saldo atual é: *R${balance:.2f}*."
 
 # --------------------
-# FUNÇÕES AUXILIARES (stubs / helpers implementados para evitar erros em produção)
+# Funções adicionais (placeholders implementadas)
 # --------------------
 def set_income(user_id, value):
-    """Grava rendimento (simples) no ORÇAMENTO."""
-    incomes = {}
+    """Define rendimento do usuário (salva em ORCAMENTO_FILE_NAME)."""
+    os.makedirs(os.path.dirname(ORCAMENTO_FILE_NAME) or '.', exist_ok=True)
+    rows = {}
     if os.path.exists(ORCAMENTO_FILE_NAME):
         with open(ORCAMENTO_FILE_NAME, 'r', encoding='utf-8') as f:
             reader = csv.reader(f, delimiter=';')
             next(reader, None)
             for row in reader:
-                if not row: continue
-                incomes[row[0]] = row[1]
-    incomes[user_id] = f"{float(value):.2f}"
+                if row:
+                    rows[row[0]] = float(row[1]) if len(row) > 1 and row[1] != '' else 0.0
+    rows[user_id] = float(value)
     with open(ORCAMENTO_FILE_NAME, 'w', encoding='utf-8') as f:
         f.write("UserID;Rendimento\n")
-        for uid, val in incomes.items():
-            f.write(f"{uid};{val}\n")
-    return f"✅ Rendimento definido como R${float(value):.2f}."
+        for uid, val in rows.items():
+            f.write(f"{uid};{float(val):.2f}\n")
+    return f"✅ Rendimento definido para R${float(value):.2f}."
 
 def get_budget_report(user_id):
-    """Relatório básico de orçamento comparando renda vs gastos do mês atual."""
+    """Relatório simples do orçamento (placeholder)."""
     rendimento = 0.0
     if os.path.exists(ORCAMENTO_FILE_NAME):
         with open(ORCAMENTO_FILE_NAME, 'r', encoding='utf-8') as f:
@@ -506,80 +492,24 @@ def get_budget_report(user_id):
                         rendimento = float(row[1])
                     except Exception:
                         rendimento = 0.0
-    # soma gastos do mês
-    now = datetime.datetime.datetime.now(TIMEZONE)
-    month_prefix = now.strftime("%Y-%m")
-    gastos_mes = 0.0
-    if os.path.exists(CSV_FILE_NAME):
-        with open(CSV_FILE_NAME, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f, delimiter=';')
-            next(reader, None)
-            for row in reader:
-                if row and row[0] == user_id:
-                    if row[2].startswith(month_prefix):
-                        try:
-                            gastos_mes += float(row[4])
-                        except Exception:
-                            continue
-    return f"📊 Orçamento:\nRendimento: R${rendimento:.2f}\nGastos este mês: R${gastos_mes:.2f}\nSaldo estimado: R${(rendimento - gastos_mes):.2f}"
+    return f"📋 *Orçamento*\nRendimento mensal: R${rendimento:.2f}\n(Função de orçamento completa em desenvolvimento.)"
+
+def compare_expenses(user_id):
+    """Comparar gastos (placeholder simplório)."""
+    return "📊 Comparação de gastos (ainda simples) — essa funcionalidade pode ser expandida para comparar meses/semana."
 
 def get_financial_tip():
     tips = [
-        "Anote todos os seus gastos diários: conhecimento é controle.",
-        "Separe uma reserva de emergência com 3-6 meses de despesas.",
-        "Revise assinaturas e serviços que você não usa todo mês.",
-        "Defina metas pequenas e alcançáveis — consistência vence velocidade.",
-        "Priorize pagar dívidas com juros altos primeiro."
+        "Guarde pelo menos 10% da sua renda todo mês.",
+        "Crie um fundo de emergência equivalente a 3-6 meses de despesas.",
+        "Revise assinaturas mensais que você não usa.",
+        "Use a regra 50/30/20 para distribuir seus ganhos: necessidades/desejos/poupança.",
+        "Anote todos os gastos por 30 dias para entender para onde vai seu dinheiro."
     ]
     return random.choice(tips)
 
-def compare_expenses(user_id):
-    """
-    Compara gastos entre o mês atual e o anterior (resumo simples).
-    """
-    now = datetime.datetime.datetime.now(TIMEZONE)
-    this_month = now.strftime("%Y-%m")
-    last_month_date = (now.replace(day=1) - datetime.timedelta(days=1))
-    last_month = last_month_date.strftime("%Y-%m")
-    sums = {this_month: 0.0, last_month: 0.0}
-    if os.path.exists(CSV_FILE_NAME):
-        with open(CSV_FILE_NAME, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f, delimiter=';')
-            next(reader, None)
-            for row in reader:
-                if row and row[0] == user_id:
-                    try:
-                        ts = row[2]
-                        val = float(row[4])
-                        if ts.startswith(this_month):
-                            sums[this_month] += val
-                        elif ts.startswith(last_month):
-                            sums[last_month] += val
-                    except Exception:
-                        continue
-    diff = sums[this_month] - sums[last_month]
-    sign = "+" if diff >= 0 else "-"
-    return f"📈 Comparação de gastos:\nMês atual ({this_month}): R${sums[this_month]:.2f}\nMês anterior ({last_month}): R${sums[last_month]:.2f}\nDiferença: {sign}R${abs(diff):.2f}"
-
 # --------------------
-# ENVIO DE MENSAGEM (WhatsApp API)
-# --------------------
-def send_whatsapp_message(phone_number, message_text):
-    try:
-        if not ACCESS_TOKEN or not PHONE_NUMBER_ID:
-            # apenas log local quando variáveis não configuradas
-            print(f"[DEBUG] não foi possível enviar (credenciais ausentes). Dest: {phone_number}\nMsg: {message_text}")
-            return
-        url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
-        headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
-        data = {"messaging_product": "whatsapp", "to": phone_number, "text": {"body": message_text}}
-        response = requests.post(url, headers=headers, json=data, timeout=10)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        print(f"Erro ao enviar mensagem para {phone_number}: {e}")
-
-# --------------------
-# ROTA DE WEBHOOK (PRINCIPAL) - MELHORIAS AQUI
+# Webhook principal (com normalização e reconhecimento flexível)
 # --------------------
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
@@ -603,30 +533,30 @@ def webhook():
             user_id = message_data['from']
             user_name = value['contacts'][0].get('profile', {}).get('name', 'Pessoa')
             raw_text = message_data['text']['body'].strip()
-            message_text = raw_text.lower()
+            message_text = raw_text  # manter original para extração
             norm_text = normalize_text(raw_text)
 
             reply_message = ""
 
-            # --- LÓGICA DE COMANDOS REESTRUTURADA (usando norm_text para reconhecer variações) ---
+            # --- LÓGICA DE COMANDOS REESTRUTURADA (usando norm_text para matching) ---
 
-            # 1. Saudações / Ajuda
+            # 1. Saudações / ajuda
             if contains_any(norm_text, ["oi", "ola", "olá", "ajuda", "comandos", "menu"]):
                 reply_message = f"Olá, {user_name}! 👋\n\n{COMMANDS_MESSAGE}"
 
             # 2. Dívidas
-            elif contains_any(norm_text, ["quais as minhas dividas", "minhas dividas", "ver dividas", "relatorio de dividas", "relatório de dividas"]):
+            elif contains_any(norm_text, ["quais as minhas dividas", "minhas dividas", "ver dividas", "relatorio de dividas", "relatório de dívidas", "minhas dívidas"]):
                 reply_message = get_debts_report(user_id)
 
             # 3. Definir rendimento
-            elif "definir rendimento" in norm_text or "meu rendimento" in norm_text:
-                values = extract_all_monetary_values(raw_text)
+            elif "definir rendimento" in norm_text or "meu rendimento e" in norm_text or "meu rendimento é" in norm_text:
+                values = extract_all_monetary_values(message_text)
                 if values:
                     reply_message = set_income(user_id, values[0])
                 else:
                     reply_message = "Não entendi o valor. Tente `definir rendimento [valor]`."
 
-            # 4. Meu orçamento
+            # 4. Orçamento
             elif "meu orcamento" in norm_text or "meu orçamento" in norm_text:
                 reply_message = get_budget_report(user_id)
 
@@ -635,36 +565,39 @@ def webhook():
                 reply_message = get_financial_tip()
 
             # 6. Comparar gastos
-            elif "comparar gastos" in norm_text or "comparar despesas" in norm_text:
+            elif "comparar gastos" in norm_text:
                 reply_message = compare_expenses(user_id)
 
             # 7. Resumo financeiro
-            elif "resumo financeiro" in norm_text or "resumo" in norm_text:
+            elif "resumo financeiro" in norm_text:
                 reply_message = get_financial_summary(user_id)
 
-            # 8. Ver saldo
-            elif contains_any(norm_text, ["qual o meu saldo", "meu saldo", "ver saldo", "saldo atual", "como esta meu saldo"]):
+            # 8. Saldo
+            elif contains_any(norm_text, ["qual o meu saldo", "meu saldo", "ver saldo", "saldo atual", "como esta meu saldo", "como está meu saldo"]):
                 balance = get_current_balance(user_id)
                 reply_message = f"💵 Seu saldo atual é de *R${balance:.2f}*."
 
-            # 9. Apagar último
+            # 9. Apagar último gasto
             elif contains_any(norm_text, ["apagar ultimo", "apagar último", "excluir ultimo", "excluir último"]):
                 reply_message = delete_last_expense(user_id)
 
-            # 10. Metas/Recorrentes (placeholder)
+            # 10. Meta/recorrente (placeholder)
             elif "meta" in norm_text or "recorrente" in norm_text:
                 reply_message = "Esta funcionalidade ainda está em desenvolvimento, mas fico feliz que você se interessou! 😉"
 
-            # 11. Relatórios de gastos (aceita 'relatorio' sem acento)
-            elif ("gastos" in norm_text and ("dia" in norm_text or "hoje" in norm_text)) or "relatorio do dia" in norm_text or "relatório do dia" in norm_text:
-                reply_message = get_period_report(user_id, "dia")
-            elif ("gastos" in norm_text and "semana" in norm_text) or ("relatorio" in norm_text and "semana" in norm_text):
-                reply_message = get_period_report(user_id, "semana")
-            elif ("gastos" in norm_text and ("mes" in norm_text or "mês" in norm_text)) or ("relatorio" in norm_text and ("mes" in norm_text or "mês" in norm_text)):
-                reply_message = get_period_report(user_id, "mês")
+            # 11. Relatórios de gastos (dia/semana/mês)
+            elif contains_any(norm_text, ["gastos do dia", "gastos da semana", "gastos do mes", "gastos do mês", "relatorio do dia", "relatório do dia", "gastos hoje", "gastos da semana", "meus gastos"]):
+                if "hoje" in norm_text or "dia" in norm_text:
+                    reply_message = get_period_report(user_id, "dia")
+                elif "semana" in norm_text:
+                    reply_message = get_period_report(user_id, "semana")
+                elif "mes" in norm_text or "mês" in norm_text:
+                    reply_message = get_period_report(user_id, "mês")
+                else:
+                    reply_message = "Não entendi o período. Tente `gastos do dia`, `gastos da semana` ou `gastos do mês`."
 
-            # 12. Entradas e saídas (variações)
-            elif any(k in norm_text for k in ["entrada e saida", "entrada e saída", "entrou e saiu", "quanto entrou", "entradas e saidas"]):
+            # 12. Entradas e saídas / balanço do período
+            elif contains_any(norm_text, ["entrada e saida", "entrada e saida", "entrada e saída", "entrou e saiu", "quanto entrou", "quanto entrou e saiu", "entradas e saidas", "entradas e saídas", "resumo do dia", "relatorio do dia", "relatório do dia"]):
                 if "hoje" in norm_text or "dia" in norm_text:
                     reply_message = get_io_summary(user_id, "dia")
                 elif "semana" in norm_text:
@@ -674,46 +607,46 @@ def webhook():
                 else:
                     reply_message = get_io_summary(user_id, "dia")
 
-            # 13. Pagamento de dívida (pagar uma dívida registrada)
-            elif any(keyword in norm_text for keyword in ["pagamento de divida", "paguei a divida", "paguei a conta", "paguei a dívida"]):
-                description = re.sub(r'(pagamento de divida|paguei a divida|paguei a conta|paguei a dívida)', '', norm_text).strip()
-                reply_message = delete_debt_from_csv(user_id, description)
-                values = extract_all_monetary_values(raw_text)
+            # 13. Pagamento de dívida / quitar dívida
+            elif contains_any(norm_text, ["pagamento de divida", "paguei a divida", "paguei a conta", "paguei a dívida", "pagamento de dívida", "paguei a dívida"]):
+                # extrai descrição do texto normalizado; valores do texto original
+                desc = re.sub(r'(pagamento de divida|paguei a divida|paguei a conta|paguei a dívida|pagamento de dívida)', '', norm_text).strip()
+                reply_message = delete_debt_from_csv(user_id, desc)
+                values = extract_all_monetary_values(message_text)
                 if values:
-                    save_expense_to_csv(user_id, f"Pagamento de Dívida: {description.capitalize()}", values[0])
+                    save_expense_to_csv(user_id, f"Pagamento de Dívida: {desc.capitalize() or 'Dívida'}", values[0])
                     record_expense_and_update_balance(user_id, values[0])
 
             # 14. Registrar dívida
-            elif any(keyword in norm_text for keyword in ["divida", "parcela", "vence", "vencimento", "venc"]):
-                values = extract_all_monetary_values(raw_text)
-                date = extract_date(raw_text)
+            elif contains_any(norm_text, ["divida", "parcela", "vence", "vencimento", "vencimentos"]):
+                values = extract_all_monetary_values(message_text)
+                date = extract_date(message_text)
                 if values:
-                    description = re.sub(r'(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+)', ' ', raw_text).strip()
-                    description = re.sub(r'(vence dia.*|divida|parcela)', '', description, flags=re.I).strip()
-                    reply_message = save_debt_to_csv(user_id, values[0], description.capitalize() or "Dívida", date=date or "Sem data")
+                    description = re.sub(r'(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+|r\$)', ' ', message_text, flags=re.I).strip()
+                    description = re.sub(r'vence dia.*|vencimento.*|dívida|divida|parcela', '', description, flags=re.I).strip()
+                    reply_message = save_debt_to_csv(user_id, values[0], description.capitalize() or "Dívida", date=date if date else "Sem data")
                 else:
                     reply_message = "Entendi que é uma dívida, mas não consegui identificar o valor."
 
             # 15. Pagamentos / Receitas
-            elif any(keyword in norm_text for keyword in ["pagamento", "recebi", "salario", "ganhei", "deposito", "recebido", "entrada"]):
-                values = extract_all_monetary_values(raw_text)
+            elif contains_any(norm_text, ["pagamento", "recebi", "salario", "salário", "ganhei", "deposito", "depósito"]):
+                values = extract_all_monetary_values(message_text)
                 if not values:
                     reply_message = "Entendi que é um pagamento, mas não consegui identificar o valor."
-                elif any(keyword in norm_text for keyword in ["ja tinha", "ja tinha na conta", "tinha na conta", "já tinha"]):
+                elif contains_any(norm_text, ["ja tinha", "já tinha", "tinha na conta", "ja tinha na conta"]):
                     total_balance = sum(values)
                     reply_message = set_balance(user_id, total_balance)
                 else:
                     payment_value = max(values)
-                    description = re.sub(r'(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+)', ' ', raw_text).strip()
+                    description = re.sub(r'(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+|r\$)', ' ', message_text, flags=re.I).strip()
                     reply_message = record_payment_and_update_balance(user_id, payment_value, description.capitalize() or "Pagamento")
 
-            # 16. Fallback -> assume gasto
+            # 16. Fallback: assume gasto
             else:
-                values = extract_all_monetary_values(raw_text)
+                values = extract_all_monetary_values(message_text)
                 if values:
                     value = values[0]
-                    description = re.sub(r'(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+)', ' ', raw_text).strip()
-                    # remove preposições no início
+                    description = re.sub(r'(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+|r\$)', ' ', message_text, flags=re.I).strip()
                     description = re.sub(r'^(de|da|do|no|na)\s', '', description, flags=re.I)
                     if not description:
                         if "perdi" in norm_text:
@@ -724,27 +657,36 @@ def webhook():
                         category = save_expense_to_csv(user_id, description.capitalize(), value)
                         record_expense_and_update_balance(user_id, value)
                         today_str = datetime.datetime.datetime.now(TIMEZONE).strftime("%d/%m")
-                        reply_message = f"✅ Gasto Registrado em {today_str}! ({category})\n- {description.capitalize()}: R${float(value):.2f}"
+                        reply_message = f"✅ Gasto Registrado em {today_str}! ({category})\n- {description.capitalize()}: R${value:.2f}"
                 else:
                     reply_message = f"Não entendi, {user_name}. Se for um gasto, tente `[descrição] [valor]`. Se precisar de ajuda, envie `comandos`."
 
-            # Envia resposta (se houver)
             if reply_message:
                 send_whatsapp_message(user_id, reply_message)
 
         except (KeyError, IndexError, TypeError) as e:
             print(f"Erro ao processar o webhook: {e}")
-            # não quebrar: retornamos sucesso para o provedor de webhook
+            # não explodir o endpoint em produção
             pass
 
         return 'EVENT_RECEIVED', 200
 
-# Healthcheck simples
-@app.route('/health', methods=['GET'])
-def health():
-    return 'OK', 200
+# --------------------
+# Envio de mensagem via WhatsApp (Facebook Graph)
+# --------------------
+def send_whatsapp_message(phone_number, message_text):
+    try:
+        url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
+        headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
+        data = {"messaging_product": "whatsapp", "to": phone_number, "text": {"body": message_text}}
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao enviar mensagem para {phone_number}: {e}")
 
-# Rodar localmente (apenas para testes; em produção o servidor do host/provedor cuida disso)
+# --------------------
+# Se quiser rodar em local (apenas para debug)
+# --------------------
 if __name__ == "__main__":
-    # Porta padrão 5000; ajuste conforme necessário
+    # roda em 0.0.0.0 para que possa ser exposto pelo servidor (ajuste conforme necessário)
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=False)
