@@ -29,15 +29,54 @@ CSV_DIVIDAS = os.path.join(DATA_DIR, "dividas_usuarios.csv")
 # Define o fuso horário para o Brasil (Brasília)
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=-3))
 
-# --- INTELIGÊNCIA DA IA: PALAVRAS-CHAVE E CATEGORias ---
+# --- INTELIGÊNCIA DA IA: EXPANSÃO MASSIVA DE CATEGORIAS ---
 CATEGORY_KEYWORDS = {
-    "Alimentação": ["restaurante", "almoço", "janta", "ifood", "rappi", "mercado", "comida", "lanche", "pizza", "hamburguer", "padaria", "café", "sorvete", "açaí", "supermercado"],
-    "Transporte": ["uber", "99", "táxi", "gasolina", "metrô", "ônibus", "passagem", "estacionamento", "combustível", "pedágio", "moto"],
-    "Moradia": ["aluguel", "condomínio", "luz", "água", "internet", "gás", "iptu", "diarista", "limpeza", "reforma", "manutenção", "conta"],
-    "Lazer": ["cinema", "show", "bar", "festa", "viagem", "streaming", "spotify", "netflix", "jogo", "ingresso", "passeio", "clube", "hobby"],
-    "Saúde": ["farmácia", "remédio", "médico", "consulta", "plano", "academia", "suplemento", "dentista", "exame", "terapia"],
-    "Compras": ["roupa", "roupas", "tênis", "sapato", "presente", "shopping", "online", "eletrônicos", "celular", "livro"],
-    "Educação": ["curso", "livro", "faculdade", "material", "escola", "aula"],
+    "Alimentação": [
+        "restaurante", "almoço", "janta", "ifood", "rappi", "mercado", "comida", "lanche", "pizza", "hamburguer", 
+        "padaria", "café", "sorvete", "açaí", "supermercado", "hortifruti", "sacolão", "feira", "açougue", 
+        "peixaria", "doces", "bolo", "salgado", "esfiha", "pastel", "churrasco", "bebida", "refrigerante", 
+        "cerveja", "vinho", "suco", "água", "energético", "quitanda", "mercearia", "conveniência", "delivery",
+        "marmita", "quentinha", "sushi", "temaki", "japonês", "chinês", "italiano", "mexicano", "árabe",
+        "pão", "leite", "queijo", "presunto", "frutas", "verduras", "legumes", "carne", "frango", "peixe",
+        "ovos", "arroz", "feijão", "macarrão", "molho", "biscoito", "bolacha", "chocolate", "bombom", "cereal"
+    ],
+    "Transporte": [
+        "uber", "99", "táxi", "gasolina", "etanol", "diesel", "combustível", "metrô", "ônibus", "trem", "passagem", 
+        "estacionamento", "pedágio", "rodízio", "multa", "ipva", "licenciamento", "seguro do carro", "mecânico",
+        "oficina", "troca de óleo", "pneu", "manutenção do carro", "lavagem", "lava-rápido", "aluguel de carro",
+        "passagem aérea", "aeroporto", "rodoviária", "barca", "balsa", "frete", "carreto", "recarga bilhete único"
+    ],
+    "Moradia": [
+        "aluguel", "condomínio", "luz", "água", "internet", "gás", "iptu", "diarista", "faxineira", "limpeza", 
+        "reforma", "manutenção", "conserto", "eletricista", "encanador", "pintor", "marceneiro", "material de construção",
+        "tinta", "cimento", "areia", "ferramenta", "decoração", "móvel", "sofá", "cama", "mesa", "cadeira",
+        "eletrodoméstico", "geladeira", "fogão", "microondas", "máquina de lavar", "tv a cabo", "segurança", "alarme"
+    ],
+    "Vestuário e Acessórios": [
+        "roupa", "roupas", "tênis", "sapato", "bota", "sandália", "chinelo", "camiseta", "camisa", "blusa", "calça",
+        "bermuda", "short", "saia", "vestido", "casaco", "jaqueta", "moletom", "terno", "blazer", "gravata",
+        "meia", "cueca", "calcinha", "sutiã", "pijama", "biquíni", "sunga", "maiô", "acessório", "bolsa",
+        "carteira", "cinto", "chapéu", "boné", "gorro", "cachecol", "luva", "óculos", "relógio", "joia",
+        "brinco", "colar", "pulseira", "anel", "maquiagem", "batom", "base", "rímel", "perfume", "creme",
+        "cosméticos", "lavanderia", "costureira", "ajuste de roupa", "sapataria"
+    ],
+    "Lazer": [
+        "cinema", "show", "teatro", "concerto", "bar", "balada", "festa", "viagem", "hotel", "pousada", "hostel",
+        "passagem de avião", "streaming", "spotify", "netflix", "hbo", "disney", "amazon prime", "youtube premium",
+        "jogo", "game", "steam", "playstation", "xbox", "nintendo", "ingresso", "passeio", "parque", "praia",
+        "clube", "hobby", "instrumento musical", "artesanato", "dança", "luta", "esporte", "futebol", "ingresso de jogo"
+    ],
+    "Saúde": [
+        "farmácia", "remédio", "medicamento", "médico", "consulta", "plano de saúde", "convênio", "academia", 
+        "suplemento", "whey", "creatina", "dentista", "aparelho", "exame", "laboratório", "terapia", "psicólogo",
+        "fisioterapia", "pilates", "yoga", "nutricionista", "oftalmologista", "óculos de grau", "lente de contato",
+        "veterinário", "pet shop", "ração", "vacina do pet"
+    ],
+    "Educação": [
+        "curso", "livro", "ebook", "faculdade", "universidade", "mensalidade", "material escolar", "caderno",
+        "caneta", "lápis", "mochila", "escola", "colégio", "aula particular", "professor", "palestra",
+        "workshop", "seminário", "inscrição", "concurso", "certificação", "idiomas", "inglês", "espanhol"
+    ],
     "Outros": []
 }
 
