@@ -75,6 +75,7 @@ Você pode falar comigo de forma natural! Tente coisas como:
 
 - `gastei 25,50 no almoço`
 - `recebi meu pagamento de 2.500,08`
+- `dívida luz 180`
 - `a parcela da moto de 450,30 vence dia 10/09`
 - `qual o meu saldo?`
 - `define meu rendimento em 3000`
@@ -101,13 +102,21 @@ Aqui estão alguns dos comandos que eu entendo:
 
 # --- Funções da IA ---
 
+# >>> CÓDIGO ALTERADO: Função de parsing de valores reconstruída para máxima precisão
 def parse_value_string(s):
+    """Converte uma string de valor para float, lidando com formatos brasileiros e americanos."""
     if not isinstance(s, str): return float(s)
     s = s.replace('R$', '').strip()
-    s = s.replace('.', '')
-    if ',' in s:
-        s = s.replace(',', '.')
+    
+    # Se o número termina com ,00 ou .00, trata como inteiro para evitar erros
+    if s.endswith(',00'): s = s[:-3]
+    if s.endswith('.00'): s = s[:-3]
+
+    # Remove pontos de milhar e troca a vírgula de decimal por ponto
+    s = s.replace('.', '').replace(',', '.')
+    
     return float(s)
+# FIM DA ALTERAÇÃO <<<
 
 def extract_all_monetary_values(text):
     pattern = r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+)'
@@ -153,48 +162,43 @@ def save_expense_to_csv(user_id, description, value):
         file.write(new_row)
     return category
 
-def save_debt_to_csv(user_id, date, value, description):
+# >>> CÓDIGO ALTERADO: Função de salvar dívida agora aceita data opcional
+def save_debt_to_csv(user_id, value, description, date="Sem data"):
     new_row = f"{user_id};{date};{description};{value:.2f}\n"
     file_exists = os.path.exists(DIVIDAS_FILE_NAME)
     with open(DIVIDAS_FILE_NAME, 'a', encoding='utf-8') as file:
         if not file_exists or os.path.getsize(DIVIDAS_FILE_NAME) == 0:
             file.write("UserID;Data de Vencimento;Descricao;Valor\n")
         file.write(new_row)
-    return f"✅ Dívida registrada: {description} no valor de R${value:.2f} com vencimento em {date}."
+    
+    if date != "Sem data":
+        return f"✅ Dívida registrada: {description} no valor de R${value:.2f} com vencimento em {date}."
+    else:
+        return f"✅ Dívida registrada: {description} no valor de R${value:.2f} (sem data de vencimento)."
+# FIM DA ALTERAÇÃO <<<
 
-# >>> NOVO CÓDIGO: Função para obter o relatório de dívidas
 def get_debts_report(user_id):
     if not os.path.exists(DIVIDAS_FILE_NAME):
         return "Nenhuma dívida registrada ainda."
-    
     report_lines = ["📋 *Suas Dívidas Pendentes* 📋\n"]
-    total_debts = 0.0
-    found_debts = False
+    total_debts, found_debts = 0.0, False
     with open(DIVIDAS_FILE_NAME, 'r', encoding='utf-8') as file:
-        reader = csv.reader(file, delimiter=';')
-        next(reader, None)
+        reader = csv.reader(file, delimiter=';'); next(reader, None)
         for row in reader:
             if row and row[0] == user_id:
                 try:
                     date_due, description, value = row[1], row[2], float(row[3])
                     report_lines.append(f"- {description} (Vence: {date_due}): R${value:.2f}")
-                    total_debts += value
-                    found_debts = True
-                except (ValueError, IndexError):
-                    continue
-    
-    if not found_debts:
-        return "Você não tem nenhuma dívida pendente. Parabéns! 🎉"
-    
+                    total_debts += value; found_debts = True
+                except (ValueError, IndexError): continue
+    if not found_debts: return "Você não tem nenhuma dívida pendente. Parabéns! 🎉"
     report_lines.append(f"\n*Total de Dívidas: R${total_debts:.2f}*")
     return "\n".join(report_lines)
-# FIM DO NOVO CÓDIGO <<<
 
 def set_balance(user_id, value):
     lines, user_found = [], False
     if os.path.exists(SALDO_FILE_NAME):
         with open(SALDO_FILE_NAME, 'r', encoding='utf-8') as file: lines = file.readlines()
-
     with open(SALDO_FILE_NAME, 'w', encoding='utf-8') as file:
         if not any(line.startswith("UserID;Saldo") for line in lines): file.write("UserID;Saldo\n")
         for line in lines:
@@ -209,7 +213,6 @@ def set_income(user_id, income):
     user_found, lines = False, []
     if os.path.exists(ORCAMENTO_FILE_NAME):
         with open(ORCAMENTO_FILE_NAME, 'r', encoding='utf-8') as file: lines = file.readlines()
-    
     with open(ORCAMENTO_FILE_NAME, 'w', encoding='utf-8') as file:
         if not any(line.startswith("UserID;Rendimento") for line in lines): file.write("UserID;Rendimento\n")
         for line in lines:
@@ -230,7 +233,6 @@ def get_budget_report(user_id):
             if row and row[0] == user_id: income = float(row[1]); break
     if income == 0.0:
         return "Você ainda não definiu o seu rendimento. Use `definir rendimento [valor]` para começar."
-
     essentials_limit, wants_limit, savings_limit = income * 0.5, income * 0.3, income * 0.2
     essentials_spent, wants_spent = 0.0, 0.0
     current_month_str = datetime.datetime.now(TIMEZONE).strftime("%Y-%m")
@@ -242,12 +244,11 @@ def get_budget_report(user_id):
                     description, value = row[3].lower(), float(row[4])
                     if any(keyword in description for keyword in CATEGORY_KEYWORDS["Essenciais"]): essentials_spent += value
                     elif any(keyword in description for keyword in CATEGORY_KEYWORDS["Desejos"]): wants_spent += value
-    
     report = ["📊 *Seu Orçamento Mensal (50/30/20)* 📊", f"\n*Gastos Essenciais (Limite: R${essentials_limit:.2f})*", f"Você gastou: R${essentials_spent:.2f}", f"\n*Desejos Pessoais (Limite: R${wants_limit:.2f})*", f"Você gastou: R${wants_spent:.2f}", f"\n*Poupança e Metas (Sugestão: R${savings_limit:.2f})*"]
     return "\n".join(report)
 
 def get_financial_tip():
-    tips = ["Dica: Anote todos os seus gastos, até os pequenos. Isso cria consciência de para onde o seu dinheiro está a ir.", "Dica: Antes de uma compra por impulso, espere 24 horas. Muitas vezes, a vontade passa e você economiza.", "Dica: Crie metas com nomes específicos, como 'Viagem'. É mais motivador do que apenas 'guardar dinheiro'.", "Dica: Reveja as suas subscrições mensais. Será que você realmente usa todos esses serviços de streaming?", "Dica: Tente a regra dos 30 dias: se quiser algo caro, espere 30 dias antes de comprar. Se ainda o quiser, vá em frente."]
+    tips = ["Dica: Anote todos os seus gastos, até os pequenos...", "Dica: Antes de uma compra por impulso, espere 24 horas...", "Dica: Crie metas com nomes específicos, como 'Viagem'...", "Dica: Reveja as suas subscrições mensais...", "Dica: Tente a regra dos 30 dias..."]
     return random.choice(tips)
 
 def compare_expenses(user_id):
@@ -256,7 +257,7 @@ def compare_expenses(user_id):
     last_month_date = now.replace(day=1) - datetime.timedelta(days=1)
     last_month_str = last_month_date.strftime("%Y-%m")
     current_month_total, last_month_total = 0.0, 0.0
-    if not os.path.exists(CSV_FILE_NAME): return "Não há dados suficientes para comparar os seus gastos."
+    if not os.path.exists(CSV_FILE_NAME): return "Não há dados suficientes para comparar."
     with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
         reader = csv.reader(file, delimiter=';'); next(reader, None)
         for row in reader:
@@ -266,11 +267,11 @@ def compare_expenses(user_id):
                     if timestamp.startswith(current_month_str): current_month_total += value
                     elif timestamp.startswith(last_month_str): last_month_total += value
                 except (ValueError, IndexError): continue
-    if last_month_total == 0: return f"Você não tem gastos registados no mês passado para comparar. Total deste mês: R${current_month_total:.2f}"
+    if last_month_total == 0: return f"Você não tem gastos no mês passado para comparar. Total deste mês: R${current_month_total:.2f}"
     difference = current_month_total - last_month_total
     percentage_change = (difference / last_month_total) * 100
     comparison_text = "aumentaram" if difference > 0 else "diminuíram"
-    report = ["📈 *Comparativo de Gastos Mensais* 📉", f"\n- Mês Passado: R${last_month_total:.2f}", f"- Mês Atual: R${current_month_total:.2f}", f"\nOs seus gastos *{comparison_text} {abs(percentage_change):.1f}%* em relação ao mês anterior."]
+    report = ["📈 *Comparativo de Gastos Mensais* 📉", f"\n- Mês Passado: R${last_month_total:.2f}", f"- Mês Atual: R${current_month_total:.2f}", f"\nOs seus gastos *{comparison_text} {abs(percentage_change):.1f}%*."]
     return "\n".join(report)
 
 def get_current_balance(user_id):
@@ -389,8 +390,6 @@ def webhook():
             
             # --- LÓGICA DE COMANDOS MAIS HUMANA E ABRANGENTE ---
             
-            # >>> CÓDIGO ALTERADO: Lógica de comando reestruturada para maior precisão
-            
             # 1. Comandos de alta prioridade (perguntas e comandos específicos)
             if any(greeting in message_text for greeting in ["oi", "olá", "ajuda", "comandos", "menu"]):
                 reply_message = f"Olá, {user_name}! 👋\n\n{COMMANDS_MESSAGE}"
@@ -425,12 +424,14 @@ def webhook():
             elif any(keyword in message_text for keyword in ["dívida", "parcela", "vence", "vencimento"]):
                 values = extract_all_monetary_values(message_text)
                 date = extract_date(message_text)
-                if values and date:
+                if values:
+                    # >>> CÓDIGO ALTERADO: Limpa a descrição da dívida
                     description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{1,2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', message_text).strip()
-                    description = re.sub(r'vence dia.*', '', description).strip()
-                    reply_message = save_debt_to_csv(user_id, date, values[0], description.capitalize())
+                    description = re.sub(r'vence dia.*|dívida|parcela', '', description).strip()
+                    reply_message = save_debt_to_csv(user_id, values[0], description.capitalize(), date=date if date else "Sem data")
+                    # FIM DA ALTERAÇÃO <<<
                 else:
-                    reply_message = "Entendi que é uma dívida, mas não consegui identificar o valor e/ou a data de vencimento (dd/mm)."
+                    reply_message = "Entendi que é uma dívida, mas não consegui identificar o valor."
 
             elif any(keyword in message_text for keyword in ["pagamento", "recebi", "salário"]):
                 values = extract_all_monetary_values(message_text)
@@ -459,7 +460,6 @@ def webhook():
                         reply_message = f"✅ Gasto Registrado em {today_str}! ({category})\n- {description.capitalize()}: R${value:.2f}"
                 else:
                     reply_message = f"Não entendi, {user_name}. Se for um gasto, tente `[descrição] [valor]`. Se precisar de ajuda, envie `comandos`."
-            # FIM DA ALTERAÇÃO <<<
 
             if reply_message:
                 send_whatsapp_message(user_id, reply_message)
