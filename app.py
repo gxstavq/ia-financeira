@@ -29,7 +29,7 @@ CSV_DIVIDAS = os.path.join(DATA_DIR, "dividas_usuarios.csv")
 # Define o fuso horário para o Brasil (Brasília)
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=-3))
 
-# --- INTELIGÊNCIA DA IA: PALAVRAS-CHAVE E CATEGORIAS ---
+# --- INTELIGÊNCIA DA IA: PALAVRAS-CHAVE E CATEGORias ---
 CATEGORY_KEYWORDS = {
     "Alimentação": ["restaurante", "almoço", "janta", "ifood", "rappi", "mercado", "comida", "lanche", "pizza", "hamburguer", "padaria", "café", "sorvete", "açaí", "supermercado"],
     "Transporte": ["uber", "99", "táxi", "gasolina", "metrô", "ônibus", "passagem", "estacionamento", "combustível", "pedágio", "moto"],
@@ -84,29 +84,47 @@ FINANCIAL_TIPS = [
 # --- FUNÇÕES AUXILIARES OTIMIZADAS ---
 
 def parse_monetary_value(text):
-    """Extrai o primeiro valor monetário de uma string."""
+    """Extrai o primeiro valor monetário de uma string de forma segura."""
     if not isinstance(text, str): return None
-    text = re.sub(r'r\$|\b(deu|custou|foi de)\b', '', text, flags=re.IGNORECASE).strip()
-    pattern = r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d{1,3}(?:\.\d{3})*\.\d{2}|\d+\.\d{2})|(\d+)'
+    # Regex aprimorado para capturar valores monetários brasileiros de forma completa
+    pattern = r'\b(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d+\.\d{2}|\d+)\b'
     match = re.search(pattern, text)
     if not match: return None
     try:
-        return float(match.group(0).replace('.', '').replace(',', '.'))
+        value_str = match.group(0)
+        # Lógica para evitar que a parte inteira de um valor com vírgula seja lida separadamente
+        if ',' in value_str and text.count(',') == 1 and len(value_str.split(',')[1]) == 2:
+             # Se encontrou um valor com vírgula, assume que é o valor completo
+             pass
+        elif ',' in text:
+             # Se há vírgulas no texto mas não no valor encontrado, pode ser um valor inteiro
+             pass
+
+        return float(value_str.replace('.', '').replace(',', '.'))
     except (ValueError, IndexError):
         return None
 
 def extract_all_transactions_intelligent(text):
     """
-    FUNÇÃO RECONSTRUÍDA: Divide a frase em cláusulas e extrai uma transação de cada.
+    FUNÇÃO RECONSTRUÍDA: Encontra todos os valores e depois atribui o contexto a eles.
+    Isso evita o erro de dividir números com vírgula.
     """
     transactions = []
-    # Divide a frase por conectores como 'e', ',', 'depois'
-    clauses = re.split(r'\s+e\s+|\s*,\s*|\s+depois\s+', text)
+    # Regex aprimorado com limites de palavra (\b) para evitar capturas parciais
+    pattern = r'\b\d{1,3}(?:\.\d{3})*,\d{2}\b|\b\d+,\d{2}\b|\b\d+\.\d{2}\b|\b\d+\b'
+    matches = list(re.finditer(pattern, text))
     
-    for clause in clauses:
-        value = parse_monetary_value(clause)
-        if value is not None:
-            transactions.append({"value": value, "context": clause})
+    last_pos = 0
+    for match in matches:
+        value_str = match.group(0)
+        try:
+            value = float(value_str.replace('.', '').replace(',', '.'))
+            # O contexto é o texto entre o último valor e o final deste valor
+            context = text[last_pos:match.end()]
+            transactions.append({"value": value, "context": context})
+            last_pos = match.end()
+        except (ValueError, IndexError):
+            continue
             
     return transactions
 
@@ -115,22 +133,37 @@ def extract_due_date(text):
     return match.group(0) if match else "Sem data"
 
 def clean_description(text, value):
+    """Função de limpeza drasticamente melhorada."""
+    # Remove o valor monetário específico do contexto para evitar confusão
     if value is not None:
-        value_patterns = [re.escape(f"{value:.2f}".replace('.', ',')), re.escape(f"{value:.2f}"), re.escape(str(int(value)))]
-        for pattern in value_patterns: text = re.sub(pattern, '', text)
+        # Cria padrões de regex para o valor exato (ex: 1.155,43, 1155.43, 1155)
+        value_patterns = [
+            re.escape(f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")), # 1.155,43
+            re.escape(f"{value:.2f}"), # 1155.43
+            re.escape(str(int(value))) # 1155
+        ]
+        for pattern in value_patterns:
+            text = re.sub(pattern, '', text)
     
+    # Remove palavras-chave e "ruído" com mais precisão
     keywords_to_remove = [
         'gastei', 'gasto', 'custou', 'foi', 'em', 'no', 'na', 'com', 'de', 'da', 'do', 'deu',
         'recebi', 'pagamento', 'salário', 'ganhei', 'rendimento', 'entrada',
         'dívida', 'conta', 'vence', 'vencimento', 'paguei', 'apagar', 'último', 'parcela', 'boleto',
-        'r\$', 'reais', 'valor', 'perdi', 'perdendo', 'dinheiro', 'acabei', 'minha', 'meu', 'pro dia'
+        r'r\$', 'reais', 'valor', 'perdi', 'perdendo', 'dinheiro', 'acabei', 'minha', 'meu', 'pro dia',
+        'e', 'depois', 'fui', 'ao'
     ]
     for keyword in keywords_to_remove:
-        text = re.sub(r'\b' + re.escape(keyword) + r'\b', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\b' + keyword + r'\b', '', text, flags=re.IGNORECASE)
     
-    text = re.sub(r'(\d{1,2}/\d{1,2})', '', text)
-    text = re.sub(r'\s+', ' ', text).strip(" ,.")
+    # Remove datas e qualquer número solto que tenha sobrado
+    text = re.sub(r'\b\d{1,2}/\d{1,2}\b', '', text)
+    text = re.sub(r'\b\d+\b', '', text) # Remove números inteiros sozinhos
+    
+    # Limpeza final de espaços e caracteres indesejados
+    text = re.sub(r'\s+', ' ', text).strip(" ,.:;")
     return text.capitalize() if text else "Gasto geral"
+
 
 def infer_category(description):
     desc_lower = description.lower()
@@ -378,7 +411,6 @@ def process_message(user_id, user_name, message_text):
     # --- LÓGICA DE TRANSAÇÃO RECONSTRUÍDA ---
     
     # 4. ANÁLISE DE INTENÇÃO PRIMEIRO
-    # Se a intenção é registrar uma dívida, trata isso primeiro e ignora o resto.
     if any(keyword in message_text for keyword in CMD_REGISTRAR_DIVIDA):
         value = parse_monetary_value(message_text)
         if value is not None:
@@ -389,7 +421,6 @@ def process_message(user_id, user_name, message_text):
     # 5. Se não for dívida, procura por transações (gastos ou entradas)
     transactions = extract_all_transactions_intelligent(message_text)
     
-    # Lógica para Múltiplas Transações
     if len(transactions) > 1:
         today_str_msg = datetime.datetime.now(TIMEZONE).strftime("%d/%m")
         response_lines = [f"Entendido! Registrei {len(transactions)} gastos para você em {today_str_msg}:"]
@@ -407,7 +438,6 @@ def process_message(user_id, user_name, message_text):
         response_lines.append(f"\nSeu novo saldo é *R${get_balance(user_id):.2f}*.")
         return "\n".join(response_lines)
 
-    # Lógica para Transação Única
     if len(transactions) == 1:
         value = transactions[0]['value']
         description = clean_description(message_text, value)
