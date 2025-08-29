@@ -92,6 +92,7 @@ Aqui estão alguns dos comandos que eu entendo:
 - `comparar gastos`
 - `gastos da [semana/mês/dia]`
 - `análise da [semana/mês]`
+- `minhas dívidas`
 
 💡 **Outros**
 - `dica financeira`
@@ -100,23 +101,15 @@ Aqui estão alguns dos comandos que eu entendo:
 
 # --- Funções da IA ---
 
-# >>> CÓDIGO ALTERADO: Função de parsing de valores muito mais robusta
 def parse_value_string(s):
-    """Converte uma string de valor para float, lidando com formatos brasileiros e americanos."""
     if not isinstance(s, str): return float(s)
     s = s.replace('R$', '').strip()
-    # Remove pontos de milhar
     s = s.replace('.', '')
-    # Troca a vírgula de decimal por ponto
     if ',' in s:
         s = s.replace(',', '.')
-    # Lida com o caso de números inteiros que foram passados como "3.000" e viraram "3000"
-    # e números decimais que viraram "1155.43"
     return float(s)
-# FIM DA ALTERAÇÃO <<<
 
 def extract_all_monetary_values(text):
-    # Regex melhorada para capturar números com ou sem separadores
     pattern = r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+)'
     matches = re.findall(pattern, text)
     if not matches:
@@ -131,7 +124,6 @@ def extract_all_monetary_values(text):
     return values
 
 def extract_date(text):
-    """Extrai uma data no formato dd/mm de uma string."""
     match = re.search(r'(\d{1,2}/\d{1,2})', text)
     if match:
         return match.group(0)
@@ -170,7 +162,33 @@ def save_debt_to_csv(user_id, date, value, description):
         file.write(new_row)
     return f"✅ Dívida registrada: {description} no valor de R${value:.2f} com vencimento em {date}."
 
-# --- NOVAS FUNÇÕES E FUNÇÕES EXISTENTES ---
+# >>> NOVO CÓDIGO: Função para obter o relatório de dívidas
+def get_debts_report(user_id):
+    if not os.path.exists(DIVIDAS_FILE_NAME):
+        return "Nenhuma dívida registrada ainda."
+    
+    report_lines = ["📋 *Suas Dívidas Pendentes* 📋\n"]
+    total_debts = 0.0
+    found_debts = False
+    with open(DIVIDAS_FILE_NAME, 'r', encoding='utf-8') as file:
+        reader = csv.reader(file, delimiter=';')
+        next(reader, None)
+        for row in reader:
+            if row and row[0] == user_id:
+                try:
+                    date_due, description, value = row[1], row[2], float(row[3])
+                    report_lines.append(f"- {description} (Vence: {date_due}): R${value:.2f}")
+                    total_debts += value
+                    found_debts = True
+                except (ValueError, IndexError):
+                    continue
+    
+    if not found_debts:
+        return "Você não tem nenhuma dívida pendente. Parabéns! 🎉"
+    
+    report_lines.append(f"\n*Total de Dívidas: R${total_debts:.2f}*")
+    return "\n".join(report_lines)
+# FIM DO NOVO CÓDIGO <<<
 
 def set_balance(user_id, value):
     lines, user_found = [], False
@@ -371,8 +389,13 @@ def webhook():
             
             # --- LÓGICA DE COMANDOS MAIS HUMANA E ABRANGENTE ---
             
+            # >>> CÓDIGO ALTERADO: Lógica de comando reestruturada para maior precisão
+            
+            # 1. Comandos de alta prioridade (perguntas e comandos específicos)
             if any(greeting in message_text for greeting in ["oi", "olá", "ajuda", "comandos", "menu"]):
                 reply_message = f"Olá, {user_name}! 👋\n\n{COMMANDS_MESSAGE}"
+            elif any(s in message_text for s in ["quais as minhas dívidas", "minhas dívidas", "ver dívidas", "relatório de dívidas"]):
+                reply_message = get_debts_report(user_id)
             elif "definir rendimento" in message_text or "meu rendimento é" in message_text:
                 values = extract_all_monetary_values(message_text)
                 if values: reply_message = set_income(user_id, values[0])
@@ -398,17 +421,16 @@ def webhook():
                 elif "mês" in message_text: reply_message = get_period_report(user_id, "mês")
                 else: reply_message = "Não entendi o período. Tente `gastos do dia`, `da semana` ou `do mês`."
             
-            # >>> CÓDIGO ALTERADO: Lógica para detetar DÍVIDAS antes de pagamentos e gastos
+            # 2. Comandos de transação (dívidas, pagamentos, gastos)
             elif any(keyword in message_text for keyword in ["dívida", "parcela", "vence", "vencimento"]):
                 values = extract_all_monetary_values(message_text)
                 date = extract_date(message_text)
                 if values and date:
                     description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{1,2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', message_text).strip()
-                    description = re.sub(r'vence dia.*', '', description).strip() # Remove a parte da data da descrição
+                    description = re.sub(r'vence dia.*', '', description).strip()
                     reply_message = save_debt_to_csv(user_id, date, values[0], description.capitalize())
                 else:
                     reply_message = "Entendi que é uma dívida, mas não consegui identificar o valor e/ou a data de vencimento (dd/mm)."
-            # FIM DA ALTERAÇÃO <<<
 
             elif any(keyword in message_text for keyword in ["pagamento", "recebi", "salário"]):
                 values = extract_all_monetary_values(message_text)
@@ -421,6 +443,7 @@ def webhook():
                     payment_value = max(values)
                     reply_message = record_payment_and_update_balance(user_id, payment_value)
 
+            # 3. Fallback: Se não for nada acima, assume que é um gasto
             else:
                 values = extract_all_monetary_values(message_text)
                 if values:
@@ -436,6 +459,7 @@ def webhook():
                         reply_message = f"✅ Gasto Registrado em {today_str}! ({category})\n- {description.capitalize()}: R${value:.2f}"
                 else:
                     reply_message = f"Não entendi, {user_name}. Se for um gasto, tente `[descrição] [valor]`. Se precisar de ajuda, envie `comandos`."
+            # FIM DA ALTERAÇÃO <<<
 
             if reply_message:
                 send_whatsapp_message(user_id, reply_message)
