@@ -83,34 +83,30 @@ FINANCIAL_TIPS = [
 
 # --- FUNÇÕES AUXILIARES OTIMIZADAS ---
 
-def extract_all_transactions(text):
+def parse_monetary_value(text):
+    """Extrai o primeiro valor monetário de uma string."""
+    if not isinstance(text, str): return None
+    text = re.sub(r'r\$|\b(deu|custou|foi de)\b', '', text, flags=re.IGNORECASE).strip()
+    pattern = r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d{1,3}(?:\.\d{3})*\.\d{2}|\d+\.\d{2})|(\d+)'
+    match = re.search(pattern, text)
+    if not match: return None
+    try:
+        return float(match.group(0).replace('.', '').replace(',', '.'))
+    except (ValueError, IndexError):
+        return None
+
+def extract_all_transactions_intelligent(text):
     """
-    NOVA FUNÇÃO: Extrai TODAS as transações monetárias de uma string,
-    junto com um trecho de texto para contexto.
+    FUNÇÃO RECONSTRUÍDA: Divide a frase em cláusulas e extrai uma transação de cada.
     """
-    pattern = r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d{1,3}(?:\.\d{3})*\.\d{2}|\d+\.\d{2}|\d+)'
-    matches = list(re.finditer(pattern, text))
-    
     transactions = []
-    if not matches:
-        return transactions
-
-    for i, match in enumerate(matches):
-        value_str = match.group(0)
-        try:
-            value = float(value_str.replace('.', '').replace(',', '.'))
-            
-            # Pega o texto entre a transação anterior (ou início) e a atual
-            start_pos = matches[i-1].end() if i > 0 else 0
-            context_text = text[start_pos:match.start()]
-            
-            # Pega o texto logo após o valor para completar a descrição
-            end_pos = matches[i+1].start() if i < len(matches) - 1 else len(text)
-            full_context = text[start_pos:end_pos]
-
-            transactions.append({"value": value, "context": full_context})
-        except (ValueError, IndexError):
-            continue
+    # Divide a frase por conectores como 'e', ',', 'depois'
+    clauses = re.split(r'\s+e\s+|\s*,\s*|\s+depois\s+', text)
+    
+    for clause in clauses:
+        value = parse_monetary_value(clause)
+        if value is not None:
+            transactions.append({"value": value, "context": clause})
             
     return transactions
 
@@ -127,7 +123,7 @@ def clean_description(text, value):
         'gastei', 'gasto', 'custou', 'foi', 'em', 'no', 'na', 'com', 'de', 'da', 'do', 'deu',
         'recebi', 'pagamento', 'salário', 'ganhei', 'rendimento', 'entrada',
         'dívida', 'conta', 'vence', 'vencimento', 'paguei', 'apagar', 'último', 'parcela', 'boleto',
-        'r\$', 'reais', 'valor', 'perdi', 'perdendo', 'dinheiro', 'acabei', 'minha', 'meu', 'pro dia', 'e', 'depois', 'fui', 'ao'
+        'r\$', 'reais', 'valor', 'perdi', 'perdendo', 'dinheiro', 'acabei', 'minha', 'meu', 'pro dia'
     ]
     for keyword in keywords_to_remove:
         text = re.sub(r'\b' + re.escape(keyword) + r'\b', '', text, flags=re.IGNORECASE)
@@ -185,7 +181,7 @@ def update_balance(user_id, new_balance):
 
 def record_expense(user_id, value, description, update=True):
     now = datetime.datetime.now(TIMEZONE)
-    now_str_db = now.strftime("%Y-%m-%d %H:%M:%S"); today_str_msg = now.strftime("%d/%m")
+    now_str_db = now.strftime("%Y-%m-%d %H:%M:%S")
     category = infer_category(description)
     header = ["UserID", "DataHora", "Descricao", "Valor", "Categoria"]
     row = [user_id, now_str_db, description, f"{value:.2f}", category]
@@ -231,7 +227,6 @@ def pay_debt(user_id, text):
     lines.pop(debt_found["index"])
     with open(CSV_DIVIDAS, 'w', encoding='utf-8') as file: file.writelines(lines)
     payment_desc = f"Pagamento: {debt_found['desc']}"
-    # Apenas registra o gasto, a resposta será formatada depois
     record_expense(user_id, debt_found['value'], payment_desc)
     return f"✅ Dívida '{debt_found['desc']}' paga com sucesso!"
 
@@ -253,7 +248,6 @@ def delete_last_expense(user_id):
 # --- FUNÇÕES DE RELATÓRIO ---
 
 def get_debts_report(user_id):
-    """NOVA FUNÇÃO: Gera um relatório de dívidas pendentes."""
     if not os.path.exists(CSV_DIVIDAS): return "Você não tem nenhuma dívida registrada. Parabéns! 🎉"
     report_lines = ["📋 *Suas Dívidas Pendentes* 📋\n"]
     total_debts = 0.0
@@ -381,37 +375,43 @@ def process_message(user_id, user_name, message_text):
         if "semana" in message_text: return get_io_summary(user_id, "semana")
         if "mês" in message_text: return get_io_summary(user_id, "mês")
 
-    # 4. LÓGICA DE MÚLTIPLAS TRANSAÇÕES
-    transactions = extract_all_transactions(message_text)
+    # --- LÓGICA DE TRANSAÇÃO RECONSTRUÍDA ---
+    
+    # 4. ANÁLISE DE INTENÇÃO PRIMEIRO
+    # Se a intenção é registrar uma dívida, trata isso primeiro e ignora o resto.
+    if any(keyword in message_text for keyword in CMD_REGISTRAR_DIVIDA):
+        value = parse_monetary_value(message_text)
+        if value is not None:
+            description = clean_description(message_text, value)
+            due_date = extract_due_date(message_text)
+            return record_debt(user_id, value, description, due_date)
+
+    # 5. Se não for dívida, procura por transações (gastos ou entradas)
+    transactions = extract_all_transactions_intelligent(message_text)
+    
+    # Lógica para Múltiplas Transações
     if len(transactions) > 1:
         today_str_msg = datetime.datetime.now(TIMEZONE).strftime("%d/%m")
-        response_lines = [f"Entendido! Registrei {len(transactions)} transações para você em {today_str_msg}:"]
+        response_lines = [f"Entendido! Registrei {len(transactions)} gastos para você em {today_str_msg}:"]
         total_value = 0
         for trans in transactions:
             value = trans['value']
-            context = trans['context']
-            description = clean_description(context, value)
-            # Assume que múltiplas transações são gastos
+            description = clean_description(trans['context'], value)
             result_line = record_expense(user_id, value, description, update=False)
             if result_line:
                 response_lines.append(result_line)
                 total_value += value
         
-        # Atualiza o saldo uma única vez com o total
         current_balance = get_balance(user_id)
         update_balance(user_id, current_balance - total_value)
         response_lines.append(f"\nSeu novo saldo é *R${get_balance(user_id):.2f}*.")
         return "\n".join(response_lines)
 
-    # 5. Lógica de Transação Única
+    # Lógica para Transação Única
     if len(transactions) == 1:
         value = transactions[0]['value']
         description = clean_description(message_text, value)
         
-        if any(keyword in message_text for keyword in CMD_REGISTRAR_DIVIDA):
-            due_date = extract_due_date(message_text)
-            return record_debt(user_id, value, description, due_date)
-            
         income_keywords = ["recebi", "salário", "ganhei", "depósito", "rendimento", "entrada", "pix", "me pagaram"]
         if any(keyword in message_text for keyword in income_keywords):
             if not description: description = "Entrada"
