@@ -79,9 +79,11 @@ Aqui estão alguns dos comandos que eu entendo:
 def parse_value_string(s):
     if not isinstance(s, str): return float(s)
     s = s.replace('R$', '').strip()
+    
     # Se o número não contém vírgula nem ponto decimal (ex: 2900), trata como inteiro
     if ',' not in s and '.' not in s:
         return float(s)
+    
     # Se contém vírgula, assume que é o decimal. Remove os pontos de milhar.
     if ',' in s:
         s = s.replace('.', '').replace(',', '.')
@@ -134,7 +136,6 @@ def save_expense_to_csv(user_id, description, value):
         file.write(new_row)
     return category
 
-# >>> NOVO CÓDIGO: Função para guardar registos de pagamentos
 def save_payment_to_csv(user_id, description, value):
     now = datetime.datetime.now(TIMEZONE)
     timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -143,7 +144,6 @@ def save_payment_to_csv(user_id, description, value):
         if not file_exists or os.path.getsize(PAGAMENTOS_FILE_NAME) == 0:
             file.write("UserID;Data e Hora;Descricao;Valor\n")
         file.write(f"{user_id};{timestamp};{description};{value:.2f}\n")
-# FIM DO NOVO CÓDIGO <<<
 
 def save_debt_to_csv(user_id, value, description, date="Sem data"):
     new_row = f"{user_id};{date};{description};{value:.2f}\n"
@@ -190,7 +190,6 @@ def delete_debt_from_csv(user_id, description_to_delete):
     return f"✅ Dívida '{description_to_delete}' paga e removida da sua lista!"
 
 def set_balance(user_id, value):
-    # ... (código existente)
     lines, user_found = [], False
     if os.path.exists(SALDO_FILE_NAME):
         with open(SALDO_FILE_NAME, 'r', encoding='utf-8') as file: lines = file.readlines()
@@ -218,12 +217,11 @@ def record_payment_and_update_balance(user_id, value, description="Pagamento"):
                 else: file.write(line)
             if not user_found: file.write(f"{user_id};{new_balance:.2f}\n")
         
-        save_payment_to_csv(user_id, description, value) # Guarda o registo do pagamento
+        save_payment_to_csv(user_id, description, value)
         today_str = datetime.datetime.now(TIMEZONE).strftime("%d/%m")
         return f"✅ Pagamento de R${value:.2f} registrado em {today_str}!\n\nSeu saldo atual é de *R${new_balance:.2f}*."
     except Exception as e: return f"Ocorreu um erro ao registrar o pagamento: {e}"
 
-# >>> NOVO CÓDIGO: Função para o relatório de entradas e saídas
 def get_io_summary(user_id, period):
     total_in, total_out = 0.0, 0.0
     now = datetime.datetime.now(TIMEZONE)
@@ -235,7 +233,6 @@ def get_io_summary(user_id, period):
     elif period == "mês":
         start_date_str, period_name = now.strftime("%Y-%m"), "no mês"
 
-    # Calcula saídas
     if os.path.exists(CSV_FILE_NAME):
         with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
             reader = csv.reader(file, delimiter=';'); next(reader, None)
@@ -245,7 +242,6 @@ def get_io_summary(user_id, period):
                     if (period == "semana" and datetime.datetime.strptime(timestamp.split(' ')[0], "%Y-%m-%d").date() >= start_date) or \
                        (period != "semana" and timestamp.startswith(start_date_str)):
                         total_out += value
-    # Calcula entradas
     if os.path.exists(PAGAMENTOS_FILE_NAME):
         with open(PAGAMENTOS_FILE_NAME, 'r', encoding='utf-8') as file:
             reader = csv.reader(file, delimiter=';'); next(reader, None)
@@ -257,10 +253,8 @@ def get_io_summary(user_id, period):
                         total_in += value
 
     return f"💸 *Balanço de {period_name}*\n\n- Entradas: *R${total_in:.2f}*\n- Saídas: *R${total_out:.2f}*"
-# FIM DO NOVO CÓDIGO <<<
 
 def send_whatsapp_message(phone_number, message_text):
-    # ... (código existente)
     try:
         url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
         headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
@@ -337,7 +331,6 @@ def get_period_report(user_id, period):
     report_lines.append(f"\n*Total gasto: R${total:.2f}*")
     return "\n".join(report_lines)
 
-
 # Webhook principal
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
@@ -398,21 +391,18 @@ def webhook():
 
             # 2. Comandos de transação (dívidas, pagamentos, gastos)
             elif any(keyword in message_text for keyword in ["pagamento de dívida", "paguei a dívida", "paguei a conta"]):
+                description = re.sub(r'pagamento de dívida|paguei a dívida|paguei a conta', '', message_text).strip()
+                reply_message = delete_debt_from_csv(user_id, description)
                 values = extract_all_monetary_values(message_text)
                 if values:
-                    description = re.sub(r'(\d+|R\$|\s+)', ' ', message_text).replace("pagamento de dívida", "").replace("paguei a", "").strip()
-                    reply_message = delete_debt_from_csv(user_id, description)
-                    # Opcional: registar o pagamento como um gasto
-                    # save_expense_to_csv(user_id, f"Pagamento de Dívida: {description.capitalize()}", values[0])
-                    # record_expense_and_update_balance(user_id, values[0])
-                else:
-                    reply_message = "Entendi que você pagou uma dívida, mas não identifiquei o valor."
+                    save_expense_to_csv(user_id, f"Pagamento de Dívida: {description.capitalize()}", values[0])
+                    record_expense_and_update_balance(user_id, values[0])
 
             elif any(keyword in message_text for keyword in ["dívida", "parcela", "vence", "vencimento"]):
                 values = extract_all_monetary_values(message_text)
                 date = extract_date(message_text)
                 if values:
-                    description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{1,2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', message_text).strip()
+                    description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', message_text).strip()
                     description = re.sub(r'vence dia.*|dívida|parcela', '', description).strip()
                     reply_message = save_debt_to_csv(user_id, values[0], description.capitalize(), date=date if date else "Sem data")
                 else:
