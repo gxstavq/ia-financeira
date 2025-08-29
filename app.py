@@ -40,7 +40,7 @@ CATEGORY_KEYWORDS = {
     ],
     "Moradia": [
         "aluguel", "condomínio", "luz", "água", "internet", "gás", "iptu", "diarista", 
-        "limpeza", "reforma", "manutenção", "conta" # Adicionado "conta"
+        "limpeza", "reforma", "manutenção", "conta"
     ],
     "Lazer": [
         "cinema", "show", "bar", "festa", "viagem", "streaming", "spotify", "netflix", 
@@ -109,35 +109,33 @@ Aqui estão alguns dos comandos que eu entendo:
 
 # --- Funções da IA ---
 
-# >>> CÓDIGO ALTERADO: Função de parsing de valores muito mais robusta
 def parse_value_string(s):
     if not isinstance(s, str): return float(s)
     s = s.replace('R$', '').strip()
-    # Se uma vírgula existe, assume que é o separador decimal. Remove todos os pontos.
     if ',' in s:
         s = s.replace('.', '').replace(',', '.')
-    # Se não houver vírgula, mas houver um ponto
     elif '.' in s:
         parts = s.split('.')
-        # Se a parte depois do último ponto tiver 3 dígitos, é um separador de milhar (ex: 2.800)
         if len(parts[-1]) == 3 and len(parts) > 1:
             s = s.replace('.', '')
-        # Caso contrário, o último ponto é um decimal (ex: 2.80)
     return float(s)
-# FIM DA ALTERAÇÃO <<<
 
-def extract_monetary_value(text):
-    # Regex melhorada para capturar o número completo
+# >>> CÓDIGO ALTERADO: A função agora extrai TODOS os valores
+def extract_all_monetary_values(text):
+    """Usa regex para encontrar todos os valores monetários numa frase."""
     pattern = r'(\d{1,3}(?:\.\d{3})*,\d{1,2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+)'
     matches = re.findall(pattern, text)
     if not matches:
-        return None, None
-    value_str = matches[-1]
-    try:
-        value_float = parse_value_string(value_str)
-        return value_float, value_str
-    except (ValueError, IndexError):
-        return None, None
+        return []
+    
+    values = []
+    for match in matches:
+        try:
+            values.append(parse_value_string(match))
+        except (ValueError, IndexError):
+            continue
+    return values
+# FIM DA ALTERAÇÃO <<<
 
 def infer_category(description):
     for category, keywords in CATEGORY_KEYWORDS.items():
@@ -164,6 +162,30 @@ def save_expense_to_csv(user_id, description, value):
     return category
 
 # --- NOVAS FUNÇÕES E FUNÇÕES EXISTENTES ---
+
+# >>> NOVO CÓDIGO: Função para definir o saldo diretamente
+def set_balance(user_id, value):
+    """Define (sobrescreve) o saldo de um utilizador."""
+    lines = []
+    user_found = False
+    if os.path.exists(SALDO_FILE_NAME):
+        with open(SALDO_FILE_NAME, 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+
+    with open(SALDO_FILE_NAME, 'w', encoding='utf-8') as file:
+        if not any(line.startswith("UserID;Saldo") for line in lines):
+            file.write("UserID;Saldo\n")
+        for line in lines:
+            if line.startswith("UserID;Saldo"): continue
+            if line.startswith(user_id):
+                file.write(f"{user_id};{value:.2f}\n")
+                user_found = True
+            else:
+                file.write(line)
+        if not user_found:
+            file.write(f"{user_id};{value:.2f}\n")
+    return f"✅ Saldo atualizado! Seu novo saldo é de *R${value:.2f}*."
+# FIM DO NOVO CÓDIGO <<<
 
 def set_income(user_id, income):
     # ... (código existente)
@@ -369,27 +391,21 @@ def get_period_report(user_id, period):
         for row in reader:
             if row and row[0] == user_id:
                 try:
-                    timestamp = row[2]
-                    value = float(row[4])
-                    description = row[3]
-                    
+                    timestamp, value, description = row[2], float(row[4]), row[3]
                     match = False
                     if period == "semana":
                         expense_date = datetime.datetime.strptime(timestamp.split(' ')[0], "%Y-%m-%d").date()
                         if expense_date >= start_date: match = True
                     elif timestamp.startswith(start_date_str):
                         match = True
-                    
                     if match:
                         report_lines.append(f"- {description}: R${value:.2f}")
                         total += value
                 except (ValueError, IndexError): continue
                 
     if len(report_lines) == 1: return f"Nenhum gasto registrado {period_name}."
-    
     report_lines.append(f"\n*Total gasto: R${total:.2f}*")
     return "\n".join(report_lines)
-
 
 def send_whatsapp_message(phone_number, message_text):
     # ... (código existente)
@@ -427,8 +443,8 @@ def webhook():
             if any(greeting in message_text for greeting in ["oi", "olá", "ajuda", "comandos", "menu"]):
                 reply_message = f"Olá, {user_name}! 👋\n\n{COMMANDS_MESSAGE}"
             elif "definir rendimento" in message_text or "meu rendimento é" in message_text:
-                value, value_str = extract_monetary_value(message_text)
-                if value: reply_message = set_income(user_id, value)
+                values = extract_all_monetary_values(message_text)
+                if values: reply_message = set_income(user_id, values[0])
                 else: reply_message = "Não entendi o valor. Tente `definir rendimento [valor]`."
             elif "meu orçamento" in message_text:
                 reply_message = get_budget_report(user_id)
@@ -446,7 +462,6 @@ def webhook():
             elif "meta" in message_text or "recorrente" in message_text:
                 reply_message = "Esta funcionalidade ainda está em desenvolvimento, mas fico feliz que você se interessou! Em breve, você poderá criar metas e agendar lançamentos. 😉"
             
-            # >>> CÓDIGO ALTERADO: Lógica de relatórios mais flexível
             elif "gastos d" in message_text or "relatório d" in message_text:
                 if "hoje" in message_text or "dia" in message_text:
                     reply_message = get_period_report(user_id, "dia")
@@ -456,20 +471,28 @@ def webhook():
                     reply_message = get_period_report(user_id, "mês")
                 else:
                     reply_message = "Não entendi o período. Tente `gastos do dia`, `da semana` ou `do mês`."
-            # FIM DA ALTERAÇÃO <<<
             
+            # >>> CÓDIGO ALTERADO: Lógica inteligente para pagamentos e saldo inicial
             elif any(keyword in message_text for keyword in ["pagamento", "recebi", "salário"]):
-                value, value_str = extract_monetary_value(message_text)
-                if value:
-                    reply_message = record_payment_and_update_balance(user_id, value)
+                values = extract_all_monetary_values(message_text)
+                if not values:
+                    reply_message = "Entendi que é um pagamento, mas não consegui identificar o valor."
+                # Se o utilizador diz que "já tinha" um valor, soma tudo para definir o saldo inicial
+                elif any(keyword in message_text for keyword in ["já tinha", "tinha na conta"]):
+                    total_balance = sum(values)
+                    reply_message = set_balance(user_id, total_balance)
+                # Caso contrário, é um pagamento normal que se soma ao saldo existente
                 else:
-                    reply_message = "Entendi que é um pagamento, mas não consegui identificar o valor. Tente de novo, por favor."
+                    payment_value = max(values) # Pega o maior valor como o pagamento principal
+                    reply_message = record_payment_and_update_balance(user_id, payment_value)
+            # FIM DA ALTERAÇÃO <<<
 
             else:
-                value, value_str = extract_monetary_value(message_text)
-                if value:
-                    description = message_text.replace(value_str, '').strip()
-                    # Remove preposições comuns que sobram na descrição
+                values = extract_all_monetary_values(message_text)
+                if values:
+                    value = values[0]
+                    # Remove todos os números e "R$" para isolar a descrição
+                    description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{1,2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', message_text).strip()
                     description = re.sub(r'^(de|da|do|no|na)\s', '', description)
                     if not description:
                         reply_message = "Parece que você enviou um valor sem descrição. Tente de novo, por favor."
