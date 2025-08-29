@@ -81,50 +81,31 @@ FINANCIAL_TIPS = [
     "Defina metas financeiras claras, como 'guardar R$1000 para uma viagem'. Metas te mantêm motivado."
 ]
 
-# --- FUNÇÕES AUXILIARES OTIMIZADAS ---
+# --- FUNÇÕES AUXILIARES RECONSTRUÍDAS ---
 
 def parse_monetary_value(text):
     """Extrai o primeiro valor monetário de uma string de forma segura."""
     if not isinstance(text, str): return None
-    # Regex aprimorado para capturar valores monetários brasileiros de forma completa
-    pattern = r'\b(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d+\.\d{2}|\d+)\b'
+    pattern = r'(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d+\.\d{2}|\d+)'
     match = re.search(pattern, text)
     if not match: return None
     try:
-        value_str = match.group(0)
-        # Lógica para evitar que a parte inteira de um valor com vírgula seja lida separadamente
-        if ',' in value_str and text.count(',') == 1 and len(value_str.split(',')[1]) == 2:
-             # Se encontrou um valor com vírgula, assume que é o valor completo
-             pass
-        elif ',' in text:
-             # Se há vírgulas no texto mas não no valor encontrado, pode ser um valor inteiro
-             pass
-
-        return float(value_str.replace('.', '').replace(',', '.'))
+        return float(match.group(1).replace('.', '').replace(',', '.'))
     except (ValueError, IndexError):
         return None
 
 def extract_all_transactions_intelligent(text):
     """
-    FUNÇÃO RECONSTRUÍDA: Encontra todos os valores e depois atribui o contexto a eles.
-    Isso evita o erro de dividir números com vírgula.
+    FUNÇÃO RECONSTRUÍDA: Divide a frase em cláusulas e extrai uma transação de cada.
     """
     transactions = []
-    # Regex aprimorado com limites de palavra (\b) para evitar capturas parciais
-    pattern = r'\b\d{1,3}(?:\.\d{3})*,\d{2}\b|\b\d+,\d{2}\b|\b\d+\.\d{2}\b|\b\d+\b'
-    matches = list(re.finditer(pattern, text))
+    # Divide a frase por conectores como 'e', ',', 'depois'
+    clauses = re.split(r'\s+e\s+|\s*,\s*|\s+depois\s+', text)
     
-    last_pos = 0
-    for match in matches:
-        value_str = match.group(0)
-        try:
-            value = float(value_str.replace('.', '').replace(',', '.'))
-            # O contexto é o texto entre o último valor e o final deste valor
-            context = text[last_pos:match.end()]
-            transactions.append({"value": value, "context": context})
-            last_pos = match.end()
-        except (ValueError, IndexError):
-            continue
+    for clause in clauses:
+        value = parse_monetary_value(clause)
+        if value is not None:
+            transactions.append({"value": value, "context": clause})
             
     return transactions
 
@@ -133,33 +114,29 @@ def extract_due_date(text):
     return match.group(0) if match else "Sem data"
 
 def clean_description(text, value):
-    """Função de limpeza drasticamente melhorada."""
-    # Remove o valor monetário específico do contexto para evitar confusão
+    """
+    FUNÇÃO DE LIMPEZA DRÁSTICAMENTE MELHORADA: Isola o sujeito da transação.
+    """
+    # Remove o valor monetário exato para não ser confundido com a descrição
     if value is not None:
-        # Cria padrões de regex para o valor exato (ex: 1.155,43, 1155.43, 1155)
-        value_patterns = [
-            re.escape(f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")), # 1.155,43
-            re.escape(f"{value:.2f}"), # 1155.43
-            re.escape(str(int(value))) # 1155
-        ]
-        for pattern in value_patterns:
-            text = re.sub(pattern, '', text)
-    
-    # Remove palavras-chave e "ruído" com mais precisão
-    keywords_to_remove = [
-        'gastei', 'gasto', 'custou', 'foi', 'em', 'no', 'na', 'com', 'de', 'da', 'do', 'deu',
-        'recebi', 'pagamento', 'salário', 'ganhei', 'rendimento', 'entrada',
-        'dívida', 'conta', 'vence', 'vencimento', 'paguei', 'apagar', 'último', 'parcela', 'boleto',
-        r'r\$', 'reais', 'valor', 'perdi', 'perdendo', 'dinheiro', 'acabei', 'minha', 'meu', 'pro dia',
-        'e', 'depois', 'fui', 'ao'
+        # Formata o valor com ponto como separador de milhar e vírgula para decimal
+        formatted_value_br = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        text = text.replace(formatted_value_br, "")
+        # Remove também o valor sem formatação
+        text = text.replace(f"{value:.2f}", "")
+        text = text.replace(str(int(value)), "")
+
+    # Remove frases e palavras de "ruído"
+    noise_patterns = [
+        r'\b(hoje|gastei|comprei|paguei|foi|deu|custou|no valor de|de)\b',
+        r'\b(recebi|salário|ganhei|depósito|rendimento|entrada)\b',
+        r'\b(dívida|conta|vence|vencimento|apagar|último|parcela|boleto)\b',
+        r'r\$', 'reais', r'\b(minha|meu|pro dia|com o)\b',
+        r'(\d{1,2}/\d{1,2})' # Remove a data
     ]
-    for keyword in keywords_to_remove:
-        text = re.sub(r'\b' + keyword + r'\b', '', text, flags=re.IGNORECASE)
-    
-    # Remove datas e qualquer número solto que tenha sobrado
-    text = re.sub(r'\b\d{1,2}/\d{1,2}\b', '', text)
-    text = re.sub(r'\b\d+\b', '', text) # Remove números inteiros sozinhos
-    
+    for pattern in noise_patterns:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+
     # Limpeza final de espaços e caracteres indesejados
     text = re.sub(r'\s+', ' ', text).strip(" ,.:;")
     return text.capitalize() if text else "Gasto geral"
@@ -261,7 +238,8 @@ def pay_debt(user_id, text):
     with open(CSV_DIVIDAS, 'w', encoding='utf-8') as file: file.writelines(lines)
     payment_desc = f"Pagamento: {debt_found['desc']}"
     record_expense(user_id, debt_found['value'], payment_desc)
-    return f"✅ Dívida '{debt_found['desc']}' paga com sucesso!"
+    new_balance = get_balance(user_id)
+    return f"✅ Dívida '{debt_found['desc']}' paga com sucesso!\nSeu novo saldo é *R${new_balance:.2f}*."
 
 def delete_last_expense(user_id):
     if not os.path.exists(CSV_GASTOS): return "Você não tem gastos para apagar."
