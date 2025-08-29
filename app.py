@@ -9,7 +9,7 @@ import csv
 import re
 import random
 from collections import defaultdict
-from flask import Flask # <-- CORREÇÃO AQUI
+from flask import Flask, request # <-- CORREÇÃO AQUI
 
 # --- CONFIGURAÇÃO DA APLICAÇÃO FLASK ---
 app = Flask(__name__)
@@ -483,5 +483,3 @@ def webhook():
             pass # Ignora eventos que não são mensagens de texto
             
         return 'EVENT_RECEIVED', 200
-
-
