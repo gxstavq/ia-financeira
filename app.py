@@ -125,44 +125,28 @@ FINANCIAL_TIPS = [
 
 def parse_monetary_value(text):
     """
-    Extrai o primeiro valor monetário de uma string de forma segura e robusta.
-    Lida com formatos como '2.440', '1.234,56' e '50,00'.
+    Função reconstruída para ser à prova de falhas com formatos numéricos brasileiros.
     """
     if not isinstance(text, str): return None
-    # Padrão regex mais robusto para capturar vários formatos numéricos brasileiros.
-    pattern = r'(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d+\.\d{2}|\d{1,3}(?:\.\d{3})*|\d+)'
-    match = re.search(pattern, text)
-    if not match: return None
+    pattern = r'(?:R\$\s*)?([\d.,]+)'
+    matches = re.findall(pattern, text)
+    if not matches: return None
+
+    best_match = ""
+    for match in matches:
+        if any(char.isdigit() for char in match):
+            if len(re.sub(r'\D', '', match)) > len(re.sub(r'\D', '', best_match)):
+                best_match = match
     
-    value_str = match.group(1)
+    if not best_match: return None
+
+    # Lógica para formato brasileiro: remove '.' de milhar, depois troca ',' por '.' decimal.
+    standardized_value = best_match.replace('.', '').replace(',', '.')
     
-    # Lógica aprimorada para interpretar corretamente os separadores
-    if ',' in value_str and '.' in value_str:
-        # Formato: 1.234,56 -> remove '.' e troca ',' por '.'
-        cleaned_value = value_str.replace('.', '').replace(',', '.')
-    elif ',' in value_str:
-        # Formato: 1234,56 ou 2,900 -> Se a parte depois da vírgula tiver 3 dígitos, é milhar
-        parts = value_str.split(',')
-        if len(parts[-1]) == 3:
-             cleaned_value = value_str.replace(',', '')
-        else:
-             cleaned_value = value_str.replace(',', '.')
-    elif '.' in value_str:
-        parts = value_str.split('.')
-        # Se a parte depois do último ponto tiver 3 dígitos, é milhar (ex: 2.900)
-        if len(parts[-1]) == 3 and len(parts) > 1:
-            cleaned_value = value_str.replace('.', '')
-        else: # É um decimal (ex: 29.90)
-            cleaned_value = value_str
-    else:
-        # É um inteiro (ex: 2900)
-        cleaned_value = value_str
-            
     try:
-        return float(cleaned_value)
+        return float(standardized_value)
     except (ValueError, IndexError):
         return None
-
 
 def extract_all_transactions_intelligent(text):
     """Divide a frase em cláusulas e extrai uma transação de cada, sem quebrar números."""
