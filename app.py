@@ -211,7 +211,10 @@ def get_balance(user_id):
             if row and row[0] == user_id: return float(row[1])
     return 0.0
 
-def update_balance(user_id, new_balance):
+def set_balance(user_id, new_balance):
+    """
+    NOVA FUNÇÃO: Define ou sobrescreve o saldo do usuário.
+    """
     lines = []; user_found = False
     if os.path.exists(CSV_SALDO):
         with open(CSV_SALDO, 'r', encoding='utf-8') as file: lines = file.readlines()
@@ -237,7 +240,7 @@ def record_expense(user_id, value, description, update=True):
     if write_to_csv(CSV_GASTOS, header, row):
         if update:
             current_balance = get_balance(user_id)
-            update_balance(user_id, current_balance - value)
+            set_balance(user_id, current_balance - value)
         return f"- {description}: *R${value:.2f}* ({category})"
     return None
 
@@ -249,7 +252,7 @@ def record_income(user_id, value, description):
     if write_to_csv(CSV_ENTRADAS, header, row):
         current_balance = get_balance(user_id)
         new_balance = current_balance + value
-        update_balance(user_id, new_balance)
+        set_balance(user_id, new_balance)
         return f"💰 Entrada registrada em {today_str_msg}!\n- {description}: *R${value:.2f}*\n\nSeu novo saldo é *R${new_balance:.2f}*."
     return "❌ Ops, não consegui registrar sua entrada."
 
@@ -292,7 +295,7 @@ def delete_last_expense(user_id):
     with open(CSV_GASTOS, 'w', encoding='utf-8') as file: file.writelines(lines)
     current_balance = get_balance(user_id)
     new_balance = current_balance + deleted_value
-    update_balance(user_id, new_balance)
+    set_balance(user_id, new_balance)
     return f"🗑️ Último gasto apagado!\n- {deleted_description}: R${deleted_value:.2f}\nO valor foi devolvido ao seu saldo. Novo saldo: *R${new_balance:.2f}*."
 
 # --- FUNÇÕES DE RELATÓRIO ---
@@ -391,7 +394,8 @@ def process_message(user_id, user_name, message_text):
     """Função principal que interpreta a mensagem do usuário e decide qual ação tomar."""
     
     # --- EXPANSÃO MASSIVA DE COMANDOS (FORMAIS E INFORMAIS) ---
-    CMD_SALDO = ["saldo", "qual meu saldo", "ver saldo", "quanto tenho", "meu dinheiro", "dinheiro em conta", "grana", "ver a grana", "kd meu dinheiro", "quanto de dinheiro eu tenho"]
+    CMD_GET_SALDO = ["qual meu saldo", "ver saldo", "quanto tenho", "meu dinheiro", "dinheiro em conta", "grana", "ver a grana", "kd meu dinheiro", "quanto de dinheiro eu tenho"]
+    CMD_SET_SALDO = ["meu saldo é", "tenho na conta", "definir saldo", "saldo inicial", "começar com", "meu saldo atual é"]
     CMD_RESUMO = ["resumo", "resumo financeiro", "visão geral", "como estou", "minhas finanças", "situação financeira", "meu status", "como estão as contas"]
     CMD_APAGAR = ["apagar último", "excluir último", "cancelar último", "apaga o último", "deleta o último", "foi errado", "lancei errado"]
     CMD_DICA = ["dica", "dica financeira", "me dê uma dica", "uma dica", "conselho", "me ajuda a economizar"]
@@ -405,7 +409,17 @@ def process_message(user_id, user_name, message_text):
     if any(cmd in message_text for cmd in ["ajuda", "comandos", "menu", "começar", "opções"]): return COMMANDS_MESSAGE
     greetings = ["oi", "olá", "bom dia", "boa tarde", "boa noite", "e aí", "opa", "salve"]
     if message_text.strip() in greetings: return f"Olá, {user_name}! Como posso te ajudar hoje? 😊"
-    if any(cmd in message_text for cmd in CMD_SALDO): return f"💵 Seu saldo atual é de *R${get_balance(user_id):.2f}*."
+    
+    # --- LÓGICA DE SALDO REFEITA ---
+    value_in_message = parse_monetary_value(message_text)
+    
+    if any(cmd in message_text for cmd in CMD_SET_SALDO) and value_in_message is not None:
+        set_balance(user_id, value_in_message)
+        return f"✅ Saldo definido! Seu saldo atual é *R${value_in_message:.2f}*."
+
+    if any(cmd in message_text for cmd in CMD_GET_SALDO) and "saldo" in message_text:
+        return f"💵 Seu saldo atual é de *R${get_balance(user_id):.2f}*."
+
     if any(cmd in message_text for cmd in CMD_RESUMO): return get_financial_summary(user_id)
     if any(cmd in message_text for cmd in CMD_APAGAR): return delete_last_expense(user_id)
     if any(cmd in message_text for cmd in CMD_DICA): return random.choice(FINANCIAL_TIPS)
@@ -451,7 +465,7 @@ def process_message(user_id, user_name, message_text):
                 total_value += value
         
         current_balance = get_balance(user_id)
-        update_balance(user_id, current_balance - total_value)
+        set_balance(user_id, current_balance - total_value)
         response_lines.append(f"\nSeu novo saldo é *R${get_balance(user_id):.2f}*.")
         return "\n".join(response_lines)
 
