@@ -11,7 +11,7 @@ import random
 from collections import defaultdict
 from flask import Flask, request
 
-# --- CONFIGURAÇÃO DA APLICAÇÃO FLASK ---
+# --- CONFIGURAÇÃO DA APLicação FLASK ---
 app = Flask(__name__)
 
 # --- CREDENCIAIS (CARREGADAS DO AMBIENTE) ---
@@ -96,8 +96,8 @@ def parse_monetary_value(text):
     # Remove R$ e espaços extras para facilitar a análise
     text = text.replace('r$', '').strip()
     
-    # <-- CORREÇÃO AQUI: Remove palavras que podem confundir a extração de números
-    text = re.sub(r'\b(deu|custou|foi de)\b', '', text)
+    # Remove palavras que podem confundir a extração de números
+    text = re.sub(r'\b(deu|custou|foi de)\b', '', text, flags=re.IGNORECASE)
 
     # Regex para encontrar números nos formatos mais comuns no Brasil
     # Prioriza números com vírgula como decimal
@@ -124,22 +124,32 @@ def clean_description(text, value):
     """Remove o valor e palavras-chave da mensagem para obter a descrição limpa."""
     if value is None:
         return text
-    # Remove o valor monetário (e variações de formato) da string
-    value_str = f"{value:.2f}".replace('.', ',') # 2900.50 -> "2900,50"
-    text = text.replace(value_str, '')
-    text = text.replace(str(int(value)), '') # Remove a parte inteira também
-    
-    # Remove palavras comuns de comando
+        
+    # Cria múltiplos padrões de regex para o valor a ser removido
+    value_patterns = [
+        re.escape(f"{value:.2f}".replace('.', ',')), # Ex: 75,90
+        re.escape(f"{value:.2f}"),                 # Ex: 75.90
+        re.escape(str(int(value)))                 # Ex: 75
+    ]
+    for pattern in value_patterns:
+        text = re.sub(pattern, '', text)
+
+    # <-- CORREÇÃO AQUI: Remove palavras comuns de comando usando regex para evitar erros
     keywords_to_remove = [
         'gastei', 'gasto', 'custou', 'foi', 'em', 'no', 'na', 'com', 'de', 'da', 'do', 'deu',
-        'recebi', 'pagamento', 'salário', 'ganhei', 'rendimento',
+        'recebi', 'pagamento', 'salário', 'ganhei', 'rendimento', 'entrada',
         'dívida', 'conta', 'vence', 'vencimento', 'paguei', 'apagar', 'último',
-        'r$'
+        'r\$', 'reais', 'valor', 'perdi', 'perdendo', 'dinheiro', 'acabei'
     ]
     for keyword in keywords_to_remove:
-        text = text.replace(keyword, '')
+        # Usa regex com `\b` (word boundary) para evitar remoção parcial de palavras (ex: 'de' em 'perdendo')
+        text = re.sub(r'\b' + re.escape(keyword) + r'\b', '', text, flags=re.IGNORECASE)
 
-    return text.strip().capitalize()
+    # Remove espaços em excesso que podem ter sobrado
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    # Se a descrição ficar vazia, retorna um padrão. Senão, capitaliza.
+    return text.capitalize() if text else "Gasto geral"
 
 
 def infer_category(description):
@@ -172,6 +182,7 @@ def get_balance(user_id):
         return 0.0
     with open(CSV_SALDO, 'r', encoding='utf-8') as file:
         reader = csv.reader(file, delimiter=';')
+        next(reader, None) # Pula o cabeçalho
         for row in reader:
             if row and row[0] == user_id:
                 return float(row[1])
@@ -187,53 +198,62 @@ def update_balance(user_id, new_balance):
 
     with open(CSV_SALDO, 'w', encoding='utf-8') as file:
         header_written = False
+        # Se o arquivo estiver vazio ou não tiver cabeçalho, escreve um
+        if not lines or not lines[0].strip().lower() == "userid;saldo":
+            file.write("UserID;Saldo\n")
+            header_written = True
+
         for line in lines:
-            # Garante que o cabeçalho seja mantido se já existir
-            if line.strip().lower() == "userid;saldo":
-                if not header_written:
-                    file.write("UserID;Saldo\n")
-                    header_written = True
+            # Garante que o cabeçalho não seja duplicado
+            if line.strip().lower() == "userid;saldo" and not header_written:
+                file.write(line)
+                header_written = True
                 continue
-            
+            elif line.strip().lower() == "userid;saldo" and header_written:
+                continue
+
             if line.startswith(user_id):
                 file.write(f"{user_id};{new_balance:.2f}\n")
                 user_found = True
-            else:
+            elif line.strip(): # Evita escrever linhas em branco
                 file.write(line)
         
-        if not header_written:
-             file.write("UserID;Saldo\n")
-
         if not user_found:
             file.write(f"{user_id};{new_balance:.2f}\n")
 
 def record_expense(user_id, value, description):
     """Registra um novo gasto e atualiza o saldo."""
-    now_str = datetime.datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.datetime.now(TIMEZONE)
+    now_str_db = now.strftime("%Y-%m-%d %H:%M:%S")
+    today_str_msg = now.strftime("%d/%m") # <-- CORREÇÃO AQUI
     category = infer_category(description)
     
     header = ["UserID", "DataHora", "Descricao", "Valor", "Categoria"]
-    row = [user_id, now_str, description, f"{value:.2f}", category]
+    row = [user_id, now_str_db, description, f"{value:.2f}", category]
     
     if write_to_csv(CSV_GASTOS, header, row):
         current_balance = get_balance(user_id)
         update_balance(user_id, current_balance - value)
-        return f"✅ Gasto registrado!\n- {description}: *R${value:.2f}* ({category})"
+        # <-- CORREÇÃO AQUI: Adiciona a data na mensagem de resposta
+        return f"✅ Gasto registrado em {today_str_msg}!\n- {description}: *R${value:.2f}* ({category})"
     else:
         return "❌ Ops, não consegui registrar seu gasto agora. Tente novamente."
 
 def record_income(user_id, value, description):
     """Registra uma nova entrada e atualiza o saldo."""
-    now_str = datetime.datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.datetime.now(TIMEZONE)
+    now_str_db = now.strftime("%Y-%m-%d %H:%M:%S")
+    today_str_msg = now.strftime("%d/%m") # <-- CORREÇÃO AQUI
     
     header = ["UserID", "DataHora", "Descricao", "Valor"]
-    row = [user_id, now_str, description, f"{value:.2f}"]
+    row = [user_id, now_str_db, description, f"{value:.2f}"]
 
     if write_to_csv(CSV_ENTRADAS, header, row):
         current_balance = get_balance(user_id)
         new_balance = current_balance + value
         update_balance(user_id, new_balance)
-        return f"💰 Entrada registrada!\n- {description}: *R${value:.2f}*\n\nSeu novo saldo é *R${new_balance:.2f}*."
+        # <-- CORREÇÃO AQUI: Adiciona a data na mensagem de resposta
+        return f"💰 Entrada registrada em {today_str_msg}!\n- {description}: *R${value:.2f}*\n\nSeu novo saldo é *R${new_balance:.2f}*."
     else:
         return "❌ Ops, não consegui registrar sua entrada agora. Tente novamente."
 
@@ -288,7 +308,7 @@ def get_period_report(user_id, period):
     elif period == "semana":
         start_date = now.date() - datetime.timedelta(days=now.weekday())
         period_name = "nesta semana"
-        report_lines.append(f"🧾 *Seus gastos {period_name}* 🧾\n")
+        report_lines.append(f"� *Seus gastos {period_name}* 🧾\n")
     elif period == "mês":
         start_date = now.date().replace(day=1)
         period_name = "neste mês"
@@ -391,7 +411,7 @@ def process_message(user_id, user_name, message_text):
     if any(word in message_text for word in ["ajuda", "comandos", "menu", "começar"]):
         return COMMANDS_MESSAGE
     
-    # <-- CORREÇÃO AQUI: A saudação agora é tratada de forma mais específica para não ser confundida.
+    # A saudação agora é tratada de forma mais específica para não ser confundida.
     greetings = ["oi", "olá", "bom dia", "boa tarde", "boa noite", "e aí", "opa"]
     if message_text.strip() in greetings:
         return f"Olá, {user_name}! Como posso te ajudar a controlar suas finanças hoje? Se precisar, digite 'comandos' para ver as opções. 😊"
