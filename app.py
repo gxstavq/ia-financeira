@@ -13,24 +13,33 @@ ACCESS_TOKEN = os.getenv("ACCESS_TOKEN") or "SEU_ACCESS_TOKEN"
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID") or "SEU_PHONE_ID"
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN") or "TOKEN123"
 
+import re
+
 def parse_transaction(text):
     """
-    Recebe frase tipo 'academia 120', 'recebi salário 2000', 'paguei ifood 37,67'
+    Recebe frase tipo 'academia 120', 'recebi salário 2.890,78', 'paguei ifood 37,67'
     e retorna dict com tipo, categoria, valor, data, descricao
     """
     text = text.lower()
-    valor_match = re.search(r'([0-9]+(?:[.,][0-9]{1,2})?)', text)
+    # Regex para pegar números no formato brasileiro (milhar e centavos)
+    valor_match = re.search(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+(?:[.,]\d{1,2})?)', text)
     if not valor_match:
         return None
 
-    valor = float(valor_match.group(1).replace(',', '.'))
+    valor_str = valor_match.group(1)
+    # Converte para float corretamente (2.890,78 -> 2890.78)
+    valor_str = valor_str.replace('.', '').replace(',', '.')
+    valor = float(valor_str)
+
     descricao = text
 
     # Data: se houver, pega; senão usa hoje
     data_match = re.search(r'(\d{2}/\d{2}/\d{4})', text)
     if data_match:
+        from datetime import datetime
         data = datetime.strptime(data_match.group(1), "%d/%m/%Y").date()
     else:
+        from datetime import datetime
         data = datetime.now().date()
     
     # Categoria e tipo (básico, pode evoluir depois)
@@ -50,7 +59,7 @@ def parse_transaction(text):
                 tipo = "despesa"
 
     # Categoria: palavra logo antes do valor
-    cat_match = re.search(r'([a-zA-Zãõáéíóúçêôâûü ]+)\s+' + valor_match.group(1), text)
+    cat_match = re.search(r'([a-zA-Zãõáéíóúçêôâûü ]+)\s+' + re.escape(valor_match.group(1)), text)
     categoria = cat_match.group(1).strip() if cat_match else ("receita" if tipo=="receita" else "outros")
 
     return {
