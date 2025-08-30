@@ -1,12 +1,11 @@
 import google.generativeai as genai
 import os
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # Defina essa variável de ambiente no Render
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+genai.configure(api_key=GEMINI_API_KEY)
 
 def interpretar_mensagem_gemini(mensagem_usuario):
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('models/gemini-pro')
-
+    model = genai.GenerativeModel('gemini-pro')  # ou troque pelo nome exato do modelo listado para você
     prompt = (
         "Você é uma IA financeira. Interprete a frase e extraia:\n"
         "- intencao (registrar_gasto, registrar_receita, consultar_saldo, ajuda, etc.)\n"
@@ -21,6 +20,5 @@ def interpretar_mensagem_gemini(mensagem_usuario):
         "}\n"
         f"Frase: {mensagem_usuario}"
     )
-
     response = model.generate_content(prompt)
     return response.text
