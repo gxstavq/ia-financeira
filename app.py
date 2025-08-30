@@ -14,7 +14,6 @@ import unicodedata  # Adicionado para normalização de texto (remoção de acen
 app = Flask(__name__)
 
 # --- SUAS CREDENCIAIS ---
-# É recomendado que estas variáveis de ambiente sejam configuradas no seu serviço de hospedagem
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
@@ -31,6 +30,26 @@ METAS_FILE_NAME = os.path.join(DATA_DIR, "metas.csv")
 RECORRENTES_FILE_NAME = os.path.join(DATA_DIR, "recorrentes.csv")
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=-3))
 
+# --- LISTAS DE FRASES PARA COMANDOS (MOVidas PARA O ESCOPO GLOBAL) ---
+GREETINGS = ["oi", "ola", "eai", "hey", "bom dia", "boa tarde", "boa noite", "tudo bem", "ajuda", "comandos", "menu", "help", "o que voce faz", "como usar", "instrucoes", "guia", "tutorial", "start", "inicio", "bem vindo", "saudacoes", "alow", "fala ai", "eae", "yo", "sup", "whats up", "ola assistente", "ei grok", "ola ia", "menu principal", "lista comandos", "ver comandos", "mostra menu", "ajuda por favor", "preciso de ajuda", "como comeco", "primeiros passos", "ola tudo bem", "bom dia assistente", "boa noite ia", "hey ai", "ola financas", "menu de opcoes", "opcoes disponiveis", "o q vc sabe fazer", "funcoes", "capacidades", "habilidades", "comandos disponiveis", "lista de comandos", "ver ajuda", "socorro", "auxilio", "suporte", "guia usuario", "manual", "instrucao", "dicas uso", "como funciona", "explicacao", "demonstracao", "exemplo comandos", "ola bot", "ei bot", "fala bot", "bot ajuda", "assistente financeiro oi", "ia financeira ola", "grok oi", "xai oi"]
+DEBTS_PHRASES = ["quais as minhas dividas", "minhas dividas", "ver dividas", "relatorio de dividas", "o q eu devo", "contas a pagar", "dividas pendentes", "lista dividas", "ver contas", "minhas contas", "debito", "o que ta pendente", "divida atual", "relatorio debito", "quais contas", "ver pendencias", "pendentes", "dividas agora", "mostra dividas", "exibe dividas", "lista de dividas", "dividas registradas", "ver minhas dividas", "quais sao minhas dividas", "dividas por favor", "relatorio das dividas", "oq devo", "contas pendentes", "ver debito", "minha divida", "dividas totais", "total dividas", "quanto devo", "quanto ta pendente", "pendencias financeiras", "lista pendentes", "ver lista dividas", "exibir dividas", "mostrar dividas", "dividas atuais", "relatorio pendentes", "quais pendencias", "debts", "my debts", "ver debts", "lista debts", "o que devo pagar", "contas pra pagar", "dividas a vencer", "vencimentos", "proximas dividas", "dividas proximas", "ver vencimentos", "lista vencimentos", "quais vencem", "dividas vencendo", "pendentes a pagar", "ver pendentes pagar", "minhas obrigacoes", "obligacoes financeiras", "ver obrigacoes", "lista obrigacoes", "quais obrigacoes", "debito pendente", "ver debito pendente", "lista debito", "exibe debito", "mostra debito", "debito atual", "debito total", "quanto em debito", "total em debito", "dividas em aberto", "ver dividas aberto", "lista aberto", "pendentes em aberto", "ver pendentes aberto", "quais em aberto", "dividas nao pagas", "ver nao pagas", "lista nao pagas", "quais nao pagas", "contas nao quitadas", "ver nao quitadas", "lista nao quitadas"]
+INCOME_PHRASES = ["definir rendimento", "meu rendimento e", "definir salario", "meu salario e", "rendimento mensal", "salario mensal", "definir ganho", "meu ganho e", "setar rendimento", "atualizar rendimento", "mudar rendimento", "rendimento eh", "salario eh", "ganho mensal", "definir income", "meu income e", "set income", "update salario", "meu rendimento atual", "definir meu rendimento", "rendimento [valor]", "salario [valor]", "ganhei mensal [valor]", "meu salario mensal [valor]", "definir rendimento mensal", "atualiza salario", "mudar salario", "salario novo", "rendimento novo", "setar salario", "definir ganhos", "meus ganhos sao", "ganhos mensais", "definir provento", "meu provento e", "proventos [valor]", "definir renda", "minha renda e", "renda mensal", "setar renda", "update renda", "renda eh", "minha renda mensal [valor]", "definir minha renda", "renda [valor]", "ganho [valor]", "meu ganho mensal [valor]", "definir ganho mensal", "atualizar ganho", "mudar ganho", "ganho novo", "setar ganho", "definir pagamento mensal", "meu pagamento e", "pagamento mensal [valor]", "definir mesada", "minha mesada e", "mesada [valor]", "definir faturamento", "meu faturamento e", "faturamento [valor]", "definir lucro", "meu lucro e", "lucro [valor]"]
+BUDGET_PHRASES = ["meu orcamento", "ver orcamento", "relatorio orcamento", "como ta meu budget", "budget atual", "ver budget", "orcamento mensal", "meu budget", "exibe orcamento", "mostra orcamento", "orcamento agora", "relatorio budget", "ver meu orcamento", "quais meu orcamento", "orcamento por favor", "meu orcamento atual", "ver orcamento mensal", "budget mensal", "meu plano financeiro", "ver plano", "plano orcamento", "exibe plano", "mostra plano financeiro", "orcamento detalhado", "detalhes orcamento", "ver detalhes budget", "resumo orcamento", "summary budget", "meu summary orcamento", "orcamento resumido", "ver resumido", "budget resumido", "como esta meu orcamento", "status orcamento", "ver status budget", "atualizacao orcamento", "update orcamento ver", "meu orcamento eh", "ver meu plano", "plano mensal", "ver plano mensal"]
+TIP_PHRASES = ["dica financeira", "dica pra economizar", "me da uma dica", "dica de grana", "tip financeiro", "conselho financeiro", "dica poupar", "como economizar", "dica investimento", "tip poupanca", "conselho grana", "dica dinheiro", "me ajuda a economizar", "dicas financas", "dica rapida", "tip rapido", "conselho rapido", "dica do dia", "tip do dia", "conselho do dia", "dica financeira por favor", "me da dica financeira", "quero uma dica", "dica ai", "tip ai", "conselho ai", "dica pra poupar", "como poupar", "dica pra investir", "como investir", "dica basica", "tip basico", "conselho basico", "dica avancada", "tip avancado", "conselho avancado", "dica sobre orcamento", "tip budget", "conselho orcamento", "dica sobre dividas", "tip debts", "conselho dividas", "dica sobre metas", "tip metas", "conselho metas"]
+COMPARE_PHRASES = ["comparar gastos", "compara mes passado", "comparacao gastos", "ver comparacao", "gastos comparados", "comparar mes atual", "comparar despesas", "ver diferenca gastos", "diferenca mes", "comparar agora vs antes", "comparacao financeira", "ver comparativo", "comparativo gastos", "compara gastos mensais", "comparar mes a mes", "ver mudancas gastos", "mudancas em gastos", "analise comparativa", "comparar periodos", "ver comparacao periodos", "gastos vs mes passado", "despesas vs anterior", "comparar saidas", "ver comparacao saidas", "comparativo despesas", "analisar diferenca", "diferenca gastos", "compara agora", "comparacao rapida", "ver rapida comparacao", "gastos comparativos", "comparar meu gastos"]
+SUMMARY_PHRASES = ["resumo financeiro", "visao geral da grana", "resumo grana", "ver resumo", "summary financeiro", "resumo atual", "visao geral", "resumo saldo", "resumo entradas saidas", "resumo total", "ver visao geral", "resumo por favor", "meu resumo", "resumo rapido", "quick summary", "resumo financas", "visao financas", "resumo mensal", "monthly summary", "resumo semanal", "weekly summary", "resumo diario", "daily summary", "resumo completo", "full summary", "resumo detalhado", "detailed summary", "resumo basico", "basic summary", "ver meu resumo", "mostra resumo", "exibe resumo", "resumo agora"]
+BALANCE_PHRASES = ["qual o meu saldo", "meu saldo", "ver saldo", "saldo atual", "como esta meu saldo", "quanto sobrou", "quanto eu tenho", "saldo", "ver meu saldo", "quanto ta sobrando", "meu dinheiro", "quanto em conta", "saldo agora", "ver saldo atual", "quanto tenho", "saldo por favor", "me mostra o saldo", "exibe saldo", "quanto sobrou ai", "to com quanto", "meu sld", "sald", "balanco", "ver balanco", "quanto $$", "dinheiro atual", "ver dinheiro", "quanto na conta", "conta atual", "ver conta", "saldo total", "total saldo", "quanto eh meu saldo", "saldo eh", "ver meu dinheiro", "quanto meu dinheiro", "saldo rapido", "quick saldo", "saldo basico", "ver saldo basico", "saldo detalhado", "detailed saldo", "como ta a conta", "conta ta como", "ver status conta", "status saldo", "atualizacao saldo", "update saldo ver"]
+DELETE_PHRASES = ["apagar ultimo gasto", "excluir ultimo", "deletar ultimo gasto", "remover ultimo", "apaga o ultimo", "exclui ultimo gasto", "delete last", "remove ultimo", "cancela ultimo gasto", "anula ultimo", "desfazer ultimo", "undo last expense", "apagar recente", "excluir recente", "deletar recente", "remover recente", "apaga recente", "exclui recente", "delete recent", "remove recent", "cancela recente", "anula recente", "desfazer recente", "undo recent", "apagar ultimo registro", "excluir ultimo registro", "deletar ultimo registro", "remover ultimo registro", "apaga ultimo registro", "exclui ultimo registro", "delete last record", "remove last record", "cancela ultimo registro", "anula ultimo registro", "desfazer ultimo registro", "undo last record"]
+META_PHRASES_SET = ["definir meta", "adicionar meta", "setar meta", "criar meta", "nova meta", "meta nova", "definir poupanca", "meta poupar", "quero meta", "set meta", "add meta", "create meta", "new meta", "definir objetivo", "adicionar objetivo", "setar objetivo", "criar objetivo", "novo objetivo", "objetivo novo", "definir target", "adicionar target", "set target", "add target", "new target", "meta [descricao] [valor]", "objetivo [descricao] [valor]", "poupar pra [descricao] [valor]", "quero poupar [valor] pra [descricao]", "meta de [valor] pra [descricao]"]
+META_PHRASES_GET = ["minhas metas", "ver metas", "lista metas", "relatorio metas", "quais metas", "metas pendentes", "ver objetivos", "lista objetivos", "relatorio objetivos", "quais objetivos", "objetivos pendentes", "ver targets", "lista targets", "my metas", "see metas", "list metas", "metas report", "what metas", "metas status", "progresso metas", "ver progresso metas", "metas atuais", "current metas", "exibe metas", "mostra metas", "metas por favor"]
+REC_PHRASES_SET = ["adicionar recorrente", "definir recorrente", "setar recorrente", "criar recorrente", "novo recorrente", "recorrente novo", "adicionar fixo", "definir fixo", "gasto fixo", "add recorrente", "set recorrente", "new recorrente", "todo mes [descricao]", "toda semana [descricao]", "recorrente [descricao] [valor] [frequencia]", "fixo [descricao] [valor] [frequencia]", "adicionar gasto recorrente", "definir gasto fixo", "setar gasto recorrente", "criar fixo"]
+REC_PHRASES_GET = ["meus recorrentes", "ver recorrentes", "lista recorrentes", "gastos fixos", "ver fixos", "lista fixos", "relatorio recorrentes", "quais recorrentes", "recorrentes pendentes", "my recorrentes", "see recorrentes", "list recorrentes", "fixos report", "what fixos", "recorrentes status", "ver gastos recorrentes", "lista gastos fixos", "exibe recorrentes", "mostra fixos", "recorrentes por favor"]
+EXPENSE_REPORT_PHRASES = ["gastos d", "relatorio d", "gastos do", "relatorio do", "ver gastos", "lista gastos", "despesas d", "ver despesas", "gastos hoje", "gastos dia", "gastos semana", "gastos mes", "relatorio hoje", "relatorio dia", "relatorio semana", "relatorio mes", "o q gastei", "quanto gastei", "gastos atuais", "despesas atuais", "ver meus gastos", "mostra gastos", "exibe despesas", "gastos por favor", "relatorio despesas", "gastos diarios", "daily expenses", "gastos semanais", "weekly expenses", "gastos mensais", "monthly expenses", "ver gastos dia", "ver gastos semana", "ver gastos mes", "lista despesas dia", "lista despesas semana", "lista despesas mes"]
+IO_PHRASES = ["entrada e saida", "entrou e saiu", "balanco", "entradas saidas", "io summary", "ver entradas", "ver saidas", "quanto entrou", "quanto saiu", "balanco hoje", "balanco dia", "balanco semana", "balanco mes", "entradas hoje", "saidas dia", "entradas semana", "saidas mes", "ver balanco", "mostra entradas saidas", "exibe balanco", "balanco por favor", "resumo entradas saidas", "io report", "entradas e saidas hoje", "entrou e saiu dia", "entradas e saidas semana", "entrou e saiu mes", "quanto entrou e saiu", "balanco rapido", "quick balanco", "balanco detalhado", "detailed io"]
+PAY_DEBT_PHRASES = ["pagamento de divida", "paguei a divida", "paguei a conta", "quitei", "pago divida", "paguei debito", "conta paga", "divida quitada", "paguei [descricao]", "quitei [descricao]", "pago [descricao]", "conta quitada", "debito pago", "paguei a luz", "paguei agua", "paguei internet", "quitei aluguel", "pago condominio", "divida paga", "ver pago", "confirmar pagamento", "registrar pagamento divida", "paguei divida de [valor]", "quitei conta", "pago a divida", "conta foi paga", "divida foi quitada", "paguei sim", "quitei sim", "pago ok", "conta ok", "debito ok"]
+DEBT_PHRASES = ["divida", "parcela", "vence", "vencimento", "conta a pagar", "debito novo", "adicionar divida", "nova divida", "registrar divida", "divida [descricao] [valor]", "parcela [valor]", "vence dia [data] [valor]", "vencimento em [data]", "conta luz [valor]", "divida aluguel [valor]", "parcela carro [valor]", "adicionar debito", "novo debito", "registrar parcela", "divida nova", "debito [descricao] [valor]", "add divida", "new debt", "register debt", "divida vence [data]", "parcela vence [data]", "conta vence [data]"]
+INCOME_ADD_PHRASES = ["recebi", "salario", "ganhei", "deposito", "entrou", "recebido", "pagamento recebido", "salario entrou", "ganhei [valor]", "deposito [valor]", "recebi salario", "entrou na conta", "recebimento", "add income", "new income", "register income", "recebi [descricao] [valor]", "salario de [valor]", "ganhei bonus [valor]", "deposito bancario [valor]", "recebi pagamento", "entrou grana", "grana entrou", "recebi dinheiro", "dinheiro entrou", "add recebimento", "novo recebimento", "registrar salario", "salario novo", "ganho novo", "recebi sim", "entrou ok", "pagamento ok"]
+
 # Função para normalizar texto (remover acentos e converter para minúsculas)
 def normalize_text(text):
     text = text.lower()
@@ -38,7 +57,7 @@ def normalize_text(text):
     text = ''.join(c for c in text if not unicodedata.combining(c))
     return text
 
-# Dicionário de palavras-chave expandido com mais termos, incluindo informais e variações
+# Dicionário de palavras-chave
 CATEGORY_KEYWORDS = {
     "Alimentação": ["restaurante", "almoço", "janta", "ifood", "rappi", "mercado", "comida", "lanche", "pizza", "hamburguer", "padaria", "café", "sorvete", "açaí", "supermercado", "refeicao", "almoco", "jantinha", "lanx", "pizzaria", "burguer", "acai", "doces", "salgados", "frutas", "vegetais", "carnes", "pao", "queijo", "leite", "iogurte", "refri", "cerveja", "vinho", "agua", "suco", "cha", "almocinho", "jantarzinho"],
     "Transporte": ["uber", "99", "táxi", "gasolina", "metrô", "ônibus", "passagem", "estacionamento", "escritorio", "combustível", "pedágio", "rodízio", "moto", "taxi", "onibus", "metro", "carro", "bicicleta", "patinete", "van", "trem", "aviao", "barco", "combustivel", "oleo", "manutencao carro", "ipva", "licenciamento", "seguro carro", "multa", "transporte publico", "cartao transporte", "uber black", "99 pop", "inDriver"],
@@ -49,10 +68,9 @@ CATEGORY_KEYWORDS = {
     "Educação": ["curso", "livro", "faculdade", "material", "escola", "aula", "palestra", "cursinho", "livros", "facul", "materiais escolares", "escolinha", "aulas", "workshop", "seminario", "certificacao", "idiomas", "ingles", "espanhol", "online course", "udemy", "coursera", "livraria escola", "caderno", "caneta", "mochila escola", "uniforme", "mensalidade", "matricula", "prova", "exame vestibular"],
     "Essenciais": ["aluguel", "condomínio", "luz", "água", "internet", "gás", "iptu", "mercado", "farmácia", "plano", "metrô", "ônibus", "combustível", "faculdade", "escola", "basico", "necessario", "essencial", "contas basicas", "morar", "viver", "sobrevivencia"],
     "Desejos": ["restaurante", "ifood", "rappi", "lanche", "pizza", "cinema", "show", "bar", "festa", "viagem", "streaming", "jogo", "roupas", "tênis", "presente", "shopping", "uber", "99", "táxi", "hobby", "luxo", "diversao", "prazer", "gostos", "caprichos", "mimos", "extras"],
-    "Outros": ["outro", "diversos", "miscelanea", "nao categorizado", "geral"]  # Adicionada categoria fallback expandida
+    "Outros": ["outro", "diversos", "miscelanea", "nao categorizado", "geral"]
 }
 
-# Mensagem de ajuda expandida com mais exemplos formais e informais
 COMMANDS_MESSAGE = """
 Olá! Sou a sua assistente financeira. 😊
 Você pode falar comigo de forma natural! Tente coisas como:
@@ -406,7 +424,6 @@ def get_financial_tip():
         "💡 Dica: Invista em educação financeira: leia livros como 'Pai Rico, Pai Pobre'.",
         "💡 Dica: Defina metas SMART: Específicas, Mensuráveis, Alcançáveis, Relevantes e Temporais.",
         "💡 Dica: Revise seu orçamento todo mês e ajuste conforme necessário.",
-        # Adicionadas mais dicas para variedade
     ]
     return random.choice(tips)
 
@@ -516,97 +533,38 @@ def webhook():
             
             reply_message = ""
             
-            # --- LÓGICA DE COMANDOS EXPANDIDA COM MILHARES DE VARIAÇÕES (USANDO LISTAS DE FRASES) ---
-            
-            # 1. Saudações e Ajuda
-            greetings = ["oi", "ola", "eai", "hey", "bom dia", "boa tarde", "boa noite", "tudo bem", "ajuda", "comandos", "menu", "help", "o que voce faz", "como usar", "instrucoes", "guia", "tutorial", "start", "inicio", "bem vindo", "saudacoes", "alow", "fala ai", "eae", "yo", "sup", "whats up", "ola assistente", "ei grok", "ola ia", "menu principal", "lista comandos", "ver comandos", "mostra menu", "ajuda por favor", "preciso de ajuda", "como comeco", "primeiros passos", "ola tudo bem", "bom dia assistente", "boa noite ia", "hey ai", "ola financas", "menu de opcoes", "opcoes disponiveis", "o q vc sabe fazer", "funcoes", "capacidades", "habilidades", "comandos disponiveis", "lista de comandos", "ver ajuda", "socorro", "auxilio", "suporte", "guia usuario", "manual", "instrucao", "dicas uso", "como funciona", "explicacao", "demonstracao", "exemplo comandos", "ola bot", "ei bot", "fala bot", "bot ajuda", "assistente financeiro oi", "ia financeira ola", "grok oi", "xai oi"]  # Centenas de variações
-            if any(g in message_text for g in greetings):
+            if any(g in message_text for g in GREETINGS):
                 reply_message = f"Olá, {user_name}! 👋\n\n{COMMANDS_MESSAGE}"
-            
-            # 2. Ver Dívidas
-                                    debts_phrases = [
-                "quais as minhas dividas", "minhas dividas", "ver dividas", "relatorio de dividas", 
-                "o q eu devo", "contas a pagar", "dividas pendentes", "lista dividas", 
-                "ver contas", "minhas contas", "debito", "o que ta pendente", 
-                "divida atual", "relatorio debito", "quais contas", "ver pendencias", 
-                "pendentes", "dividas agora", "mostra dividas", "exibe dividas", 
-                "lista de dividas", "dividas registradas", "ver minhas dividas", 
-                "quais sao minhas dividas", "dividas por favor", "relatorio das dividas", 
-                "oq devo", "contas pendentes", "ver debito", "minha divida", 
-                "dividas totais", "total dividas", "quanto devo", "quanto ta pendente", 
-                "pendencias financeiras", "lista pendentes", "ver lista dividas", 
-                "exibir dividas", "mostrar dividas", "dividas atuais", "relatorio pendentes", 
-                "quais pendencias", "debts", "my debts", "ver debts", "lista debts", 
-                "o que devo pagar", "contas pra pagar", "dividas a vencer", "vencimentos", 
-                "proximas dividas", "dividas proximas", "ver vencimentos", "lista vencimentos", 
-                "quais vencem", "dividas vencendo", "pendentes a pagar", "ver pendentes pagar", 
-                "minhas obrigacoes", "obligacoes financeiras", "ver obrigacoes", "lista obrigacoes", 
-                "quais obrigacoes", "debito pendente", "ver debito pendente", "lista debito", 
-                "exibe debito", "mostra debito", "debito atual", "debito total", 
-                "quanto em debito", "total em debito", "dividas em aberto", "ver dividas aberto", 
-                "lista aberto", "pendentes em aberto", "ver pendentes aberto", "quais em aberto", 
-                "dividas nao pagas", "ver nao pagas", "lista nao pagas", "quais nao pagas", 
-                "contas nao quitadas", "ver nao quitadas", "lista nao quitadas"
-            ]  # Muitas variações
-            elif any(s in message_text for s in debts_phrases):
+            elif any(s in message_text for s in DEBTS_PHRASES):
                 reply_message = get_debts_report(user_id)
-            
-            # 3. Definir Rendimento
-            income_phrases = ["definir rendimento", "meu rendimento e", "definir salario", "meu salario e", "rendimento mensal", "salario mensal", "definir ganho", "meu ganho e", "setar rendimento", "atualizar rendimento", "mudar rendimento", "rendimento eh", "salario eh", "ganho mensal", "definir income", "meu income e", "set income", "update salario", "meu rendimento atual", "definir meu rendimento", "rendimento [valor]", "salario [valor]", "ganhei mensal [valor]", "meu salario mensal [valor]", "definir rendimento mensal", "atualiza salario", "mudar salario", "salario novo", "rendimento novo", "setar salario", "definir ganhos", "meus ganhos sao", "ganhos mensais", "definir provento", "meu provento e", "proventos [valor]", "definir renda", "minha renda e", "renda mensal", "setar renda", "update renda", "renda eh", "minha renda mensal [valor]", "definir minha renda", "renda [valor]", "ganho [valor]", "meu ganho mensal [valor]", "definir ganho mensal", "atualizar ganho", "mudar ganho", "ganho novo", "setar ganho", "definir pagamento mensal", "meu pagamento e", "pagamento mensal [valor]", "definir mesada", "minha mesada e", "mesada [valor]", "definir faturamento", "meu faturamento e", "faturamento [valor]", "definir lucro", "meu lucro e", "lucro [valor]"]  
-            if any(s in message_text for s in income_phrases):
+            elif any(s in message_text for s in INCOME_PHRASES):
                 values = extract_all_monetary_values(original_message_text)
                 if values: reply_message = set_income(user_id, values[0])
                 else: reply_message = "Não entendi o valor. Tente `definir rendimento [valor]`."
-            
-            # 4. Ver Orçamento
-            budget_phrases = ["meu orcamento", "ver orcamento", "relatorio orcamento", "como ta meu budget", "budget atual", "ver budget", "orcamento mensal", "meu budget", "exibe orcamento", "mostra orcamento", "orcamento agora", "relatorio budget", "ver meu orcamento", "quais meu orcamento", "orcamento por favor", "meu orcamento atual", "ver orcamento mensal", "budget mensal", "meu plano financeiro", "ver plano", "plano orcamento", "exibe plano", "mostra plano financeiro", "orcamento detalhado", "detalhes orcamento", "ver detalhes budget", "resumo orcamento", "summary budget", "meu summary orcamento", "orcamento resumido", "ver resumido", "budget resumido", "como esta meu orcamento", "status orcamento", "ver status budget", "atualizacao orcamento", "update orcamento ver", "meu orcamento eh", "ver meu plano", "plano mensal", "ver plano mensal"]  
-            elif any(s in message_text for s in budget_phrases):
+            elif any(s in message_text for s in BUDGET_PHRASES):
                 reply_message = get_budget_report(user_id)
-            
-            # 5. Dica Financeira
-            tip_phrases = ["dica financeira", "dica pra economizar", "me da uma dica", "dica de grana", "tip financeiro", "conselho financeiro", "dica poupar", "como economizar", "dica investimento", "tip poupanca", "conselho grana", "dica dinheiro", "me ajuda a economizar", "dicas financas", "dica rapida", "tip rapido", "conselho rapido", "dica do dia", "tip do dia", "conselho do dia", "dica financeira por favor", "me da dica financeira", "quero uma dica", "dica ai", "tip ai", "conselho ai", "dica pra poupar", "como poupar", "dica pra investir", "como investir", "dica basica", "tip basico", "conselho basico", "dica avancada", "tip avancado", "conselho avancado", "dica sobre orcamento", "tip budget", "conselho orcamento", "dica sobre dividas", "tip debts", "conselho dividas", "dica sobre metas", "tip metas", "conselho metas"]  
-            elif any(s in message_text for s in tip_phrases):
+            elif any(s in message_text for s in TIP_PHRASES):
                 reply_message = get_financial_tip()
-            
-            # 6. Comparar Gastos
-            compare_phrases = ["comparar gastos", "compara mes passado", "comparacao gastos", "ver comparacao", "gastos comparados", "comparar mes atual", "comparar despesas", "ver diferenca gastos", "diferenca mes", "comparar agora vs antes", "comparacao financeira", "ver comparativo", "comparativo gastos", "compara gastos mensais", "comparar mes a mes", "ver mudancas gastos", "mudancas em gastos", "analise comparativa", "comparar periodos", "ver comparacao periodos", "gastos vs mes passado", "despesas vs anterior", "comparar saidas", "ver comparacao saidas", "comparativo despesas", "analisar diferenca", "diferenca gastos", "compara agora", "comparacao rapida", "ver rapida comparacao", "gastos comparativos", "comparar meu gastos"]  
-            elif any(s in message_text for s in compare_phrases):
+            elif any(s in message_text for s in COMPARE_PHRASES):
                 reply_message = compare_expenses(user_id)
-            
-            # 7. Resumo Financeiro
-            summary_phrases = ["resumo financeiro", "visao geral da grana", "resumo grana", "ver resumo", "summary financeiro", "resumo atual", "visao geral", "resumo saldo", "resumo entradas saidas", "resumo total", "ver visao geral", "resumo por favor", "meu resumo", "resumo rapido", "quick summary", "resumo financas", "visao financas", "resumo mensal", "monthly summary", "resumo semanal", "weekly summary", "resumo diario", "daily summary", "resumo completo", "full summary", "resumo detalhado", "detailed summary", "resumo basico", "basic summary", "ver meu resumo", "mostra resumo", "exibe resumo", "resumo agora"]  
-            elif any(s in message_text for s in summary_phrases):
+            elif any(s in message_text for s in SUMMARY_PHRASES):
                 reply_message = get_financial_summary(user_id)
-            
-            # 8. Ver Saldo
-            balance_phrases = ["qual o meu saldo", "meu saldo", "ver saldo", "saldo atual", "como esta meu saldo", "quanto sobrou", "quanto eu tenho", "saldo", "ver meu saldo", "quanto ta sobrando", "meu dinheiro", "quanto em conta", "saldo agora", "ver saldo atual", "quanto tenho", "saldo por favor", "me mostra o saldo", "exibe saldo", "quanto sobrou ai", "to com quanto", "meu sld", "sald", "balanco", "ver balanco", "quanto $$", "dinheiro atual", "ver dinheiro", "quanto na conta", "conta atual", "ver conta", "saldo total", "total saldo", "quanto eh meu saldo", "saldo eh", "ver meu dinheiro", "quanto meu dinheiro", "saldo rapido", "quick saldo", "saldo basico", "ver saldo basico", "saldo detalhado", "detailed saldo", "como ta a conta", "conta ta como", "ver status conta", "status saldo", "atualizacao saldo", "update saldo ver"]  
-            elif any(s in message_text for s in balance_phrases):
+            elif any(s in message_text for s in BALANCE_PHRASES):
                 balance = get_current_balance(user_id)
                 reply_message = f"💵 Seu saldo atual é de *R${balance:.2f}*."
-            
-            # 9. Apagar Último Gasto
-            delete_phrases = ["apagar ultimo gasto", "excluir ultimo", "deletar ultimo gasto", "remover ultimo", "apaga o ultimo", "exclui ultimo gasto", "delete last", "remove ultimo", "cancela ultimo gasto", "anula ultimo", "desfazer ultimo", "undo last expense", "apagar recente", "excluir recente", "deletar recente", "remover recente", "apaga recente", "exclui recente", "delete recent", "remove recent", "cancela recente", "anula recente", "desfazer recente", "undo recent", "apagar ultimo registro", "excluir ultimo registro", "deletar ultimo registro", "remover ultimo registro", "apaga ultimo registro", "exclui ultimo registro", "delete last record", "remove last record", "cancela ultimo registro", "anula ultimo registro", "desfazer ultimo registro", "undo last record"]  
-            elif any(s in message_text for s in delete_phrases):
+            elif any(s in message_text for s in DELETE_PHRASES):
                 reply_message = delete_last_expense(user_id)
-            
-            # 10. Metas
-            meta_phrases_set = ["definir meta", "adicionar meta", "setar meta", "criar meta", "nova meta", "meta nova", "definir poupanca", "meta poupar", "quero meta", "set meta", "add meta", "create meta", "new meta", "definir objetivo", "adicionar objetivo", "setar objetivo", "criar objetivo", "novo objetivo", "objetivo novo", "definir target", "adicionar target", "set target", "add target", "new target", "meta [descricao] [valor]", "objetivo [descricao] [valor]", "poupar pra [descricao] [valor]", "quero poupar [valor] pra [descricao]", "meta de [valor] pra [descricao]"]
-            meta_phrases_get = ["minhas metas", "ver metas", "lista metas", "relatorio metas", "quais metas", "metas pendentes", "ver objetivos", "lista objetivos", "relatorio objetivos", "quais objetivos", "objetivos pendentes", "ver targets", "lista targets", "my metas", "see metas", "list metas", "metas report", "what metas", "metas status", "progresso metas", "ver progresso metas", "metas atuais", "current metas", "exibe metas", "mostra metas", "metas por favor"]
-            if any(s in message_text for s in meta_phrases_set):
+            elif any(s in message_text for s in META_PHRASES_SET):
                 values = extract_all_monetary_values(original_message_text)
                 if values:
                     description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', original_message_text).strip()
-                    description = re.sub(r'definir meta|adicionar meta|setar meta|criar meta|nova meta|definir poupanca|meta poupar|quero meta|definir objetivo|adicionar objetivo|setar objetivo|criar objetivo|novo objetivo|definir target|adicionar target', '', description, flags=re.IGNORECASE).strip()
+                    description = re.sub(r'|'.join(META_PHRASES_SET), '', description, flags=re.IGNORECASE).strip()
                     reply_message = save_meta_to_csv(user_id, description.capitalize(), values[0])
                 else:
                     reply_message = "Não entendi o valor. Tente `definir meta [descricao] [valor]`."
-            elif any(s in message_text for s in meta_phrases_get):
+            elif any(s in message_text for s in META_PHRASES_GET):
                 reply_message = get_metas_report(user_id)
-            
-            # 11. Recorrentes
-            rec_phrases_set = ["adicionar recorrente", "definir recorrente", "setar recorrente", "criar recorrente", "novo recorrente", "recorrente novo", "adicionar fixo", "definir fixo", "gasto fixo", "add recorrente", "set recorrente", "new recorrente", "todo mes [descricao]", "toda semana [descricao]", "recorrente [descricao] [valor] [frequencia]", "fixo [descricao] [valor] [frequencia]", "adicionar gasto recorrente", "definir gasto fixo", "setar gasto recorrente", "criar fixo"]
-            rec_phrases_get = ["meus recorrentes", "ver recorrentes", "lista recorrentes", "gastos fixos", "ver fixos", "lista fixos", "relatorio recorrentes", "quais recorrentes", "recorrentes pendentes", "my recorrentes", "see recorrentes", "list recorrentes", "fixos report", "what fixos", "recorrentes status", "ver gastos recorrentes", "lista gastos fixos", "exibe recorrentes", "mostra fixos", "recorrentes por favor"]
-            if any(s in message_text for s in rec_phrases_set):
+            elif any(s in message_text for s in REC_PHRASES_SET):
                 values = extract_all_monetary_values(original_message_text)
                 if values:
                     parts = re.split(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$)', original_message_text)
@@ -618,33 +576,24 @@ def webhook():
                         elif 'ano' in normalize_text(part): frequency = 'anual'
                         elif 'dia' in normalize_text(part): frequency = 'diario'
                         else: description += part.strip()
-                    description = re.sub(r'adicionar recorrente|definir recorrente|setar recorrente|criar recorrente|novo recorrente|adicionar fixo|definir fixo|gasto fixo|todo mes|toda semana|recorrente|fixo|adicionar gasto recorrente|definir gasto fixo|setar gasto recorrente|criar fixo', '', description, flags=re.IGNORECASE).strip()
+                    description = re.sub(r'|'.join(REC_PHRASES_SET), '', description, flags=re.IGNORECASE).strip()
                     reply_message = save_recorrente_to_csv(user_id, description.capitalize(), values[0], frequency)
                 else:
                     reply_message = "Não entendi o valor. Tente `adicionar recorrente [descricao] [valor] [frequencia]`."
-            elif any(s in message_text for s in rec_phrases_get):
+            elif any(s in message_text for s in REC_PHRASES_GET):
                 reply_message = get_recorrentes_report(user_id)
-            
-            # 12. Relatório de Gastos por Período
-            expense_report_phrases = ["gastos d", "relatorio d", "gastos do", "relatorio do", "ver gastos", "lista gastos", "despesas d", "ver despesas", "gastos hoje", "gastos dia", "gastos semana", "gastos mes", "relatorio hoje", "relatorio dia", "relatorio semana", "relatorio mes", "o q gastei", "quanto gastei", "gastos atuais", "despesas atuais", "ver meus gastos", "mostra gastos", "exibe despesas", "gastos por favor", "relatorio despesas", "gastos diarios", "daily expenses", "gastos semanais", "weekly expenses", "gastos mensais", "monthly expenses", "ver gastos dia", "ver gastos semana", "ver gastos mes", "lista despesas dia", "lista despesas semana", "lista despesas mes"]
-            if any(s in message_text for s in expense_report_phrases):
+            elif any(s in message_text for s in EXPENSE_REPORT_PHRASES):
                 if "hoje" in message_text or "dia" in message_text: reply_message = get_period_report(user_id, "dia")
                 elif "semana" in message_text: reply_message = get_period_report(user_id, "semana")
                 elif "mes" in message_text or "mês" in message_text: reply_message = get_period_report(user_id, "mês")
                 else: reply_message = "Não entendi o período. Tente `gastos do dia`, `da semana` ou `do mês`."
-            
-            # 13. Entradas e Saídas por Período
-            io_phrases = ["entrada e saida", "entrou e saiu", "balanco", "entradas saidas", "io summary", "ver entradas", "ver saidas", "quanto entrou", "quanto saiu", "balanco hoje", "balanco dia", "balanco semana", "balanco mes", "entradas hoje", "saidas dia", "entradas semana", "saidas mes", "ver balanco", "mostra entradas saidas", "exibe balanco", "balanco por favor", "resumo entradas saidas", "io report", "entradas e saidas hoje", "entrou e saiu dia", "entradas e saidas semana", "entrou e saiu mes", "quanto entrou e saiu", "balanco rapido", "quick balanco", "balanco detalhado", "detailed io"]
-            if any(s in message_text for s in io_phrases):
+            elif any(s in message_text for s in IO_PHRASES):
                 if "hoje" in message_text or "dia" in message_text: reply_message = get_io_summary(user_id, "dia")
                 elif "semana" in message_text: reply_message = get_io_summary(user_id, "semana")
                 elif "mes" in message_text or "mês" in message_text: reply_message = get_io_summary(user_id, "mês")
                 else: reply_message = "Não entendi o período. Tente `entradas e saídas de hoje`."
-            
-            # 14. Pagamento de Dívida
-            pay_debt_phrases = ["pagamento de divida", "paguei a divida", "paguei a conta", "quitei", "pago divida", "paguei debito", "conta paga", "divida quitada", "paguei [descricao]", "quitei [descricao]", "pago [descricao]", "conta quitada", "debito pago", "paguei a luz", "paguei agua", "paguei internet", "quitei aluguel", "pago condominio", "divida paga", "ver pago", "confirmar pagamento", "registrar pagamento divida", "paguei divida de [valor]", "quitei conta", "pago a divida", "conta foi paga", "divida foi quitada", "paguei sim", "quitei sim", "pago ok", "conta ok", "debito ok"]
-            elif any(keyword in message_text for keyword in pay_debt_phrases):
-                description = re.sub(r'|'.join(pay_debt_phrases), '', message_text, flags=re.IGNORECASE).strip()
+            elif any(keyword in message_text for keyword in PAY_DEBT_PHRASES):
+                description = re.sub(r'|'.join(PAY_DEBT_PHRASES), '', message_text, flags=re.IGNORECASE).strip()
                 values = extract_all_monetary_values(original_message_text)
                 if values:
                     description_text_only = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', description).strip()
@@ -655,22 +604,16 @@ def webhook():
                     reply_message = f"{delete_response}\n\nSeu saldo agora é de *R${current_balance:.2f}*."
                 else:
                     reply_message = "Não consegui identificar o valor pago. Tente: `paguei a conta de luz 150`"
-            
-            # 15. Adicionar Dívida
-            debt_phrases = ["divida", "parcela", "vence", "vencimento", "conta a pagar", "debito novo", "adicionar divida", "nova divida", "registrar divida", "divida [descricao] [valor]", "parcela [valor]", "vence dia [data] [valor]", "vencimento em [data]", "conta luz [valor]", "divida aluguel [valor]", "parcela carro [valor]", "adicionar debito", "novo debito", "registrar parcela", "divida nova", "debito [descricao] [valor]", "add divida", "new debt", "register debt", "divida vence [data]", "parcela vence [data]", "conta vence [data]"]
-            elif any(keyword in message_text for keyword in debt_phrases):
+            elif any(keyword in message_text for keyword in DEBT_PHRASES):
                 values = extract_all_monetary_values(original_message_text)
                 date = extract_date(original_message_text)
                 if values:
                     description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', original_message_text).strip()
-                    description = re.sub(r'|'.join(debt_phrases), '', description, flags=re.IGNORECASE).strip()
+                    description = re.sub(r'|'.join(DEBT_PHRASES), '', description, flags=re.IGNORECASE).strip()
                     reply_message = save_debt_to_csv(user_id, values[0], description.capitalize(), date=date if date else "Sem data")
                 else:
                     reply_message = "Entendi que é uma dívida, mas não consegui identificar o valor."
-            
-            # 16. Adicionar Recebimento
-            income_add_phrases = ["recebi", "salario", "ganhei", "deposito", "entrou", "recebido", "pagamento recebido", "salario entrou", "ganhei [valor]", "deposito [valor]", "recebi salario", "entrou na conta", "recebimento", "add income", "new income", "register income", "recebi [descricao] [valor]", "salario de [valor]", "ganhei bonus [valor]", "deposito bancario [valor]", "recebi pagamento", "entrou grana", "grana entrou", "recebi dinheiro", "dinheiro entrou", "add recebimento", "novo recebimento", "registrar salario", "salario novo", "ganho novo", "recebi sim", "entrou ok", "pagamento ok"]
-            if any(keyword in message_text for keyword in income_add_phrases):
+            elif any(keyword in message_text for keyword in INCOME_ADD_PHRASES):
                 values = extract_all_monetary_values(original_message_text)
                 if not values:
                     reply_message = "Entendi que é uma entrada, mas não consegui identificar o valor."
@@ -680,11 +623,9 @@ def webhook():
                 else:
                     payment_value = max(values)
                     description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', original_message_text).strip()
-                    description = re.sub(r'|'.join(income_add_phrases), '', description, flags=re.IGNORECASE).strip()
+                    description = re.sub(r'|'.join(INCOME_ADD_PHRASES), '', description, flags=re.IGNORECASE).strip()
                     reply_message = record_payment_and_update_balance(user_id, payment_value, description.capitalize() if description else "Entrada")
-            
-            # 17. Fallback: Gasto
-            elif not reply_message:
+            else: # Fallback: Gasto
                 values = extract_all_monetary_values(original_message_text)
                 if values:
                     value = values[0]
@@ -712,4 +653,5 @@ def webhook():
         return 'EVENT_RECEIVED', 200
 
 if __name__ == "__main__":
-    app.run(debug=False, port=os.getenv("PORT", default=5000))  # Desativado debug para produção
+    app.run(debug=False, port=os.getenv("PORT", default=5000))
+
