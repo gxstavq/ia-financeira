@@ -62,6 +62,7 @@ def send_whatsapp_message(phone_number, message_text):
     try:
         response = requests.post(url, headers=headers, json=data)
         response.raise_for_status()
+        print(f"Mensagem enviada para {phone_number}: {message_text}")
     except Exception as e:
         print("Erro ao enviar mensagem:", e)
 
@@ -85,70 +86,67 @@ def webhook():
             user_id = message_data['from']
             message_text = message_data['text']['body'].strip()
 
-            # Chama Gemini para interpretar a mensagem do usuário
-            interpretacao = interpretar_mensagem_gemini(message_text)
-            try:
-                dados = json.loads(interpretacao)
-            except Exception as e:
-                print("Resposta do Gemini não é JSON válido:", interpretacao)
-                send_whatsapp_message(user_id, "❌ Desculpe, não entendi sua mensagem. Tente reformular.")
+            # --- AQUI ESTÁ A CORREÇÃO ---
+            # A função já retorna um dicionário Python (ou None), não precisamos de json.loads.
+            dados = interpretar_mensagem_gemini(message_text)
+
+            # Se a IA não conseguir interpretar, 'dados' será None.
+            if not dados:
+                print("A função interpretar_mensagem_gemini retornou None.")
+                send_whatsapp_message(user_id, "Desculpe, estou com dificuldade para entender. Tente novamente.")
                 return 'EVENT_RECEIVED', 200
 
             resp = ""
-            if dados.get("intencao") == "registrar_receita":
+            intencao = dados.get("intencao")
+
+            if intencao == "registrar_receita":
                 transacao = {
-                    "tipo": "receita",
-                    "categoria": dados.get("categoria", "receita"),
-                    "valor": dados.get("valor", 0),
-                    "data": dados.get("data") or str(date.today()),
-                    "descricao": dados.get("descricao") or message_text,
-                    "recorrencia": dados.get("recorrencia"),
-                    "data_vencimento": dados.get("data_vencimento"),
-                    "status": "pago",
+                    "tipo": "receita", "categoria": dados.get("categoria", "receita"),
+                    "valor": dados.get("valor", 0), "data": dados.get("data") or str(date.today()),
+                    "descricao": dados.get("descricao") or message_text, "recorrencia": dados.get("recorrencia"),
+                    "data_vencimento": dados.get("data_vencimento"), "status": "pago",
                     "observacao": dados.get("observacao", "")
                 }
                 registrar_transacao(user_id, transacao)
                 resp = f"🟢 Receita registrada: {transacao['categoria']} | R${transacao['valor']:.2f} | {transacao['data']}"
 
-            elif dados.get("intencao") == "registrar_gasto":
+            elif intencao == "registrar_gasto":
                 transacao = {
-                    "tipo": "despesa",
-                    "categoria": dados.get("categoria", "despesa"),
-                    "valor": dados.get("valor", 0),
-                    "data": dados.get("data") or str(date.today()),
-                    "descricao": dados.get("descricao") or message_text,
-                    "recorrencia": dados.get("recorrencia"),
-                    "data_vencimento": dados.get("data_vencimento"),
-                    "status": "pago",
+                    "tipo": "despesa", "categoria": dados.get("categoria", "despesa"),
+                    "valor": dados.get("valor", 0), "data": dados.get("data") or str(date.today()),
+                    "descricao": dados.get("descricao") or message_text, "recorrencia": dados.get("recorrencia"),
+                    "data_vencimento": dados.get("data_vencimento"), "status": "pago",
                     "observacao": dados.get("observacao", "")
                 }
                 registrar_transacao(user_id, transacao)
                 resp = f"🔴 Despesa registrada: {transacao['categoria']} | R${transacao['valor']:.2f} | {transacao['data']}"
 
-            elif dados.get("intencao") == "consultar_saldo":
+            elif intencao == "consultar_saldo":
                 saldo, total_receita, total_despesa = resumo_usuario(user_id)
                 resp = f"💰 Seu saldo: R${saldo:.2f}\nReceitas: R${total_receita:.2f}\nDespesas: R${total_despesa:.2f}"
+            
+            # Lógica adicionada para saudações e ajuda
+            elif intencao == "saudacao":
+                resp = "Olá! 👋 Como posso te ajudar com suas finanças hoje?"
 
-            elif dados.get("intencao") == "ajuda":
+            elif intencao == "ajuda":
                 resp = (
                     "🤖 Eu sou sua IA financeira!\n\n"
                     "Você pode:\n"
                     "• Registrar gastos: mercado 120\n"
                     "• Registrar receitas: recebi salário 2000\n"
                     "• Consultar saldo: saldo\n"
-                    "• Ver últimas transações: extrato\n"
-                    "• Consultar orçamento do mês: orçamento\n"
-                    "• Consultar gastos do dia: gastos de hoje\n"
-                    "• E muito mais! Tente frases livres 😉"
                 )
+            # Resposta para quando a IA não entende a intenção
             else:
-                resp = "❓ Não entendi sua mensagem. Tente novamente ou peça ajuda."
+                resp = "❓ Não entendi sua mensagem. Tente registrar um gasto (ex: 'gastei 50 no açaí') ou peça 'ajuda'."
 
             send_whatsapp_message(user_id, resp)
 
         except Exception as e:
-            print("Erro no webhook:", e)
+            print("Erro geral no webhook:", e)
+        
         return 'EVENT_RECEIVED', 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
