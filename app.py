@@ -16,10 +16,12 @@ VERIFY_TOKEN = os.getenv("VERIFY_TOKEN") or "TOKEN123"
 def registrar_transacao(user_id, transacao):
     conn = get_db()
     c = conn.cursor()
+    # CORREÇÃO: Removido 'recorrencia' e 'data_vencimento' do INSERT,
+    # pois essas colunas não existem na sua tabela do banco de dados.
     c.execute(
         '''
-        INSERT INTO transacoes (user_id, tipo, categoria, valor, data, descricao, recorrencia, data_vencimento, status, observacao)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO transacoes (user_id, tipo, categoria, valor, data, descricao, status, observacao)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''',
         (
             user_id,
@@ -28,8 +30,6 @@ def registrar_transacao(user_id, transacao):
             transacao.get("valor"),
             transacao.get("data"),
             transacao.get("descricao"),
-            transacao.get("recorrencia"),
-            transacao.get("data_vencimento"),
             transacao.get("status", "pago"),
             transacao.get("observacao", "")
         )
@@ -150,3 +150,4 @@ def webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
