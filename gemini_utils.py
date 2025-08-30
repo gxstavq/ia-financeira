@@ -5,7 +5,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # Defina essa variável de ambient
 
 def interpretar_mensagem_gemini(mensagem_usuario):
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-pro')
+    model = genai.GenerativeModel('models/gemini-pro')
 
     prompt = (
         "Você é uma IA financeira. Interprete a frase e extraia:\n"
