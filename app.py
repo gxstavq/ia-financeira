@@ -8,8 +8,8 @@ import datetime
 import csv
 import re
 import random
-from collections import defaultdict
 from flask import Flask, request
+import google.generativeai as genai # Nova importação para o Gemini
 
 # --- CONFIGURAÇÃO DA APLicação FLASK ---
 app = Flask(__name__)
@@ -18,6 +18,16 @@ app = Flask(__name__)
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") # Nova credencial para a API do Gemini
+
+# --- CONFIGURAÇÃO DA API DO GEMINI ---
+try:
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    print("API do Gemini configurada com sucesso.")
+except Exception as e:
+    print(f"!!! ERRO AO CONFIGURAR A API DO GEMINI: {e} !!!")
+    model = None
 
 # --- CONFIGURAÇÃO DOS ARQUIVOS DE DADOS ---
 DATA_DIR = os.getenv('RENDER_DISK_PATH', '.')
@@ -29,168 +39,85 @@ CSV_DIVIDAS = os.path.join(DATA_DIR, "dividas_usuarios.csv")
 # Define o fuso horário para o Brasil (Brasília)
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=-3))
 
-# --- INTELIGÊNCIA DA IA: EXPANSÃO MASSIVA DE CATEGORIAS ---
+# --- CATEGORIAS (USADAS PELAS FUNÇÕES, NÃO MAIS PELO PROCESSADOR PRINCIPAL) ---
 CATEGORY_KEYWORDS = {
-    "Alimentação": [
-        "restaurante", "almoço", "janta", "ifood", "rappi", "mercado", "comida", "lanche", "pizza", "hamburguer", 
-        "padaria", "café", "sorvete", "açaí", "supermercado", "hortifruti", "sacolão", "feira", "açougue", 
-        "peixaria", "doces", "bolo", "salgado", "esfiha", "pastel", "churrasco", "bebida", "refrigerante", 
-        "cerveja", "vinho", "suco", "água", "energético", "quitanda", "mercearia", "conveniência", "delivery",
-        "marmita", "quentinha", "sushi", "temaki", "japonês", "chinês", "italiano", "mexicano", "árabe",
-        "pão", "leite", "queijo", "presunto", "frutas", "verduras", "legumes", "carne", "frango", "peixe",
-        "ovos", "arroz", "feijão", "macarrão", "molho", "biscoito", "bolacha", "chocolate", "bombom", "cereal",
-        "chiclete"
-    ],
-    "Transporte": [
-        "uber", "99", "táxi", "gasolina", "etanol", "diesel", "combustível", "metrô", "ônibus", "trem", "passagem", 
-        "estacionamento", "pedágio", "rodízio", "multa", "ipva", "licenciamento", "seguro do carro", "mecânico",
-        "oficina", "troca de óleo", "pneu", "manutenção do carro", "lavagem", "lava-rápido", "aluguel de carro",
-        "passagem aérea", "aeroporto", "rodoviária", "barca", "balsa", "frete", "carreto", "recarga bilhete único"
-    ],
-    "Moradia": [
-        "aluguel", "condomínio", "luz", "água", "internet", "gás", "iptu", "diarista", "faxineira", "limpeza", 
-        "reforma", "manutenção", "conserto", "eletricista", "encanador", "pintor", "marceneiro", "material de construção",
-        "tinta", "cimento", "areia", "ferramenta", "decoração", "móvel", "sofá", "cama", "mesa", "cadeira",
-        "eletrodoméstico", "geladeira", "fogão", "microondas", "máquina de lavar", "tv a cabo", "segurança", "alarme"
-    ],
-    "Vestuário e Acessórios": [
-        "roupa", "roupas", "tênis", "sapato", "bota", "sandália", "chinelo", "camiseta", "camisa", "blusa", "calça",
-        "bermuda", "short", "saia", "vestido", "casaco", "jaqueta", "moletom", "terno", "blazer", "gravata",
-        "meia", "cueca", "calcinha", "sutiã", "pijama", "biquíni", "sunga", "maiô", "acessório", "bolsa",
-        "carteira", "cinto", "chapéu", "boné", "gorro", "cachecol", "luva", "óculos", "relógio", "joia",
-        "brinco", "colar", "pulseira", "anel", "maquilhagem", "batom", "base", "rímel", "perfume", "creme",
-        "cosméticos", "lavanderia", "costureira", "ajuste de roupa", "sapataria"
-    ],
-    "Lazer": [
-        "cinema", "show", "teatro", "concerto", "bar", "balada", "festa", "viagem", "hotel", "pousada", "hostel",
-        "passagem de avião", "streaming", "spotify", "netflix", "hbo", "disney", "amazon prime", "youtube premium",
-        "jogo", "game", "steam", "playstation", "xbox", "nintendo", "ingresso", "passeio", "parque", "praia",
-        "clube", "hobby", "instrumento musical", "artesanato", "dança", "luta", "esporte", "futebol", "ingresso de jogo"
-    ],
-    "Saúde": [
-        "farmácia", "remédio", "medicamento", "médico", "consulta", "plano de saúde", "convênio", "academia", 
-        "suplemento", "whey", "creatina", "dentista", "aparelho", "exame", "laboratório", "terapia", "psicólogo",
-        "fisioterapia", "pilates", "yoga", "nutricionista", "oftalmologista", "óculos de grau", "lente de contato",
-        "veterinário", "pet shop", "ração", "vacina do pet"
-    ],
-    "Educação": [
-        "curso", "livro", "ebook", "faculdade", "universidade", "mensalidade", "material escolar", "caderno",
-        "caneta", "lápis", "mochila", "escola", "colégio", "aula particular", "professor", "palestra",
-        "workshop", "seminário", "inscrição", "concurso", "certificação", "idiomas", "inglês", "espanhol"
-    ],
-    "Outros": []
+    "Alimentação": ["restaurante", "almoço", "janta", "ifood", "rappi", "mercado", "comida", "lanche", "pizza", "hamburguer", "padaria", "café", "sorvete", "açaí", "supermercado", "hortifruti", "sacolão", "feira", "açougue", "peixaria", "doces", "bolo", "salgado", "esfiha", "pastel", "churrasco", "bebida", "refrigerante", "cerveja", "vinho", "suco", "água", "energético", "quitanda", "mercearia", "conveniência", "delivery", "marmita", "quentinha", "sushi", "temaki", "japonês", "chinês", "italiano", "mexicano", "árabe", "pão", "leite", "queijo", "presunto", "frutas", "verduras", "legumes", "carne", "frango", "peixe", "ovos", "arroz", "feijão", "macarrão", "molho", "biscoito", "bolacha", "chocolate", "bombom", "cereal", "chiclete"],
+    "Transporte": ["uber", "99", "táxi", "gasolina", "etanol", "diesel", "combustível", "metrô", "ônibus", "trem", "passagem", "estacionamento", "pedágio", "rodízio", "multa", "ipva", "licenciamento", "seguro do carro", "mecânico", "oficina", "troca de óleo", "pneu", "manutenção do carro", "lavagem", "lava-rápido", "aluguel de carro", "passagem aérea", "aeroporto", "rodoviária", "barca", "balsa", "frete", "carreto", "recarga bilhete único"],
+    "Moradia": ["aluguel", "condomínio", "luz", "água", "internet", "gás", "iptu", "diarista", "faxineira", "limpeza", "reforma", "manutenção", "conserto", "eletricista", "encanador", "pintor", "marceneiro", "material de construção", "tinta", "cimento", "areia", "ferramenta", "decoração", "móvel", "sofá", "cama", "mesa", "cadeira", "eletrodoméstico", "geladeira", "fogão", "microondas", "máquina de lavar", "tv a cabo", "segurança", "alarme"],
+    "Vestuário e Acessórios": ["roupa", "roupas", "tênis", "sapato", "bota", "sandália", "chinelo", "camiseta", "camisa", "blusa", "calça", "bermuda", "short", "saia", "vestido", "casaco", "jaqueta", "moletom", "terno", "blazer", "gravata", "meia", "cueca", "calcinha", "sutiã", "pijama", "biquíni", "sunga", "maiô", "acessório", "bolsa", "carteira", "cinto", "chapéu", "boné", "gorro", "cachecol", "luva", "óculos", "relógio", "joia", "brinco", "colar", "pulseira", "anel", "maquilhagem", "batom", "base", "rímel", "perfume", "creme", "cosméticos", "lavanderia", "costureira", "ajuste de roupa", "sapataria"],
+    "Lazer": ["cinema", "show", "teatro", "concerto", "bar", "balada", "festa", "viagem", "hotel", "pousada", "hostel", "passagem de avião", "streaming", "spotify", "netflix", "hbo", "disney", "amazon prime", "youtube premium", "jogo", "game", "steam", "playstation", "xbox", "nintendo", "ingresso", "passeio", "parque", "praia", "clube", "hobby", "instrumento musical", "artesanato", "dança", "luta", "esporte", "futebol", "ingresso de jogo"],
+    "Saúde": ["farmácia", "remédio", "medicamento", "médico", "consulta", "plano de saúde", "convênio", "academia", "suplemento", "whey", "creatina", "dentista", "aparelho", "exame", "laboratório", "terapia", "psicólogo", "fisioterapia", "pilates", "yoga", "nutricionista", "oftalmologista", "óculos de grau", "lente de contato", "veterinário", "pet shop", "ração", "vacina do pet"],
+    "Educação": ["curso", "livro", "ebook", "faculdade", "universidade", "mensalidade", "material escolar", "caderno", "caneta", "lápis", "mochila", "escola", "colégio", "aula particular", "professor", "palestra", "workshop", "seminário", "inscrição", "concurso", "certificação", "idiomas", "inglês", "espanhol"],
 }
 
-# --- MENSAGENS E DICAS ---
-COMMANDS_MESSAGE = """
-Olá! Sou sua assistente financeira pessoal. 💸
-
-Você pode falar comigo como se estivesse conversando com alguém!
-
-*Exemplos do que você pode me dizer:*
-- `gastei 25,50 no almoço`
-- `recebi 3500 do salário`
-- `tenho uma conta de luz de 180 que vence 15/09`
-- `paguei a conta de luz`
-- `qual meu saldo?`
-- `o que gastei hoje?`
-
-*Principais Comandos:*
-📊 *RELATÓRIOS*
-- `saldo`: Para ver seu saldo atual.
-- `resumo financeiro`: Visão geral com saldo e dívidas.
-- `gastos hoje` (ou `semana`/`mês`): Lista seus gastos.
-- `entradas e saídas hoje` (ou `semana`/`mês`): Mostra o balanço.
-- `minhas dívidas`: Lista suas dívidas pendentes.
-
-⚙️ *AÇÕES*
-- `apagar último gasto`: Remove o último gasto registrado.
-- `paguei [descrição da dívida]`: Marca uma dívida como paga e registra o gasto.
-- `dica`: Te dou uma dica financeira.
-
-Qualquer dúvida, é só chamar! 😊
-"""
-
+# --- DICAS FINANCEIRAS ---
 FINANCIAL_TIPS = [
-    "Anote todos os seus gastos, até os pequenos. Isso te ajuda a entender para onde seu dinheiro está indo.",
-    "Crie um orçamento mensal. A regra 50/30/20 (50% necessidades, 30% desejos, 20% poupança) é um bom começo!",
-    "Antes de uma compra por impulso, espere 24 horas. Muitas vezes, a vontade passa e você economiza.",
-    "Tenha uma reserva de emergência. O ideal é ter o equivalente a 3 a 6 meses do seu custo de vida guardado.",
-    "Compare preços antes de comprar. A internet facilita muito a pesquisa e a economia.",
-    "Evite usar o cartão de crédito para compras do dia a dia. É mais fácil perder o controle dos gastos assim.",
-    "Defina metas financeiras claras, como 'guardar R$1000 para uma viagem'. Metas te mantêm motivado."
+    "Anote todos os seus gastos, até os pequenos. Isso te ajuda a entender para onde seu dinheiro está indo.", "Crie um orçamento mensal. A regra 50/30/20 (50% necessidades, 30% desejos, 20% poupança) é um bom começo!", "Antes de uma compra por impulso, espere 24 horas. Muitas vezes, a vontade passa e você economiza.", "Tenha uma reserva de emergência. O ideal é ter o equivalente a 3 a 6 meses do seu custo de vida guardado.", "Compare preços antes de comprar. A internet facilita muito a pesquisa e a economia.", "Evite usar o cartão de crédito para compras do dia a dia. É mais fácil perder o controle dos gastos assim.", "Defina metas financeiras claras, como 'guardar R$1000 para uma viagem'. Metas te mantêm motivado."
 ]
 
-# --- FUNÇÕES AUXILIARES RECONSTRUÍDAS ---
+# --- O NOVO CÉREBRO: O PROMPT DE SISTEMA PARA O GEMINI ---
+SYSTEM_PROMPT = """
+Você é um assistente financeiro especialista em interpretar mensagens de WhatsApp em português do Brasil. Sua única função é analisar a mensagem do usuário e extrair os dados financeiros, retornando APENAS um objeto JSON.
 
-def parse_monetary_value(text):
-    """
-    Função reconstruída para ser à prova de falhas com formatos numéricos brasileiros.
-    """
-    if not isinstance(text, str): return None
-    pattern = r'(?:R\$\s*)?([\d.,]+)'
-    matches = re.findall(pattern, text)
-    if not matches: return None
+**Regras Estritas:**
+1.  **NUNCA** responda com texto conversacional. Sua saída deve ser **EXCLUSIVAMENTE** um JSON válido.
+2.  Se a mensagem for um cumprimento, pedido de ajuda ou algo não financeiro, retorne `{"action": "chat", "response": "ajuda"}`.
+3.  Analise a **intenção principal** antes de extrair os dados.
+4.  Para valores monetários, sempre converta para um número (float), independentemente do formato de entrada (ex: "2.250,50" -> 2250.50, "2.250" -> 2250.0).
 
-    best_match = ""
-    for match in matches:
-        if any(char.isdigit() for char in match):
-            if len(re.sub(r'\D', '', match)) > len(re.sub(r'\D', '', best_match)):
-                best_match = match
+**Estrutura do JSON de Saída:**
+
+-   **Para registrar gastos:**
+    `{"action": "record_expense", "transactions": [{"value": 50.50, "description": "Almoço"}, {"value": 15.00, "description": "Uber"}]}`
+    (A lista `transactions` pode conter um ou mais objetos).
+
+-   **Para registrar uma entrada/salário:**
+    `{"action": "record_income", "value": 3500.00, "description": "Salário"}`
+
+-   **Para registrar uma dívida:**
+    `{"action": "record_debt", "value": 180.75, "description": "Conta de luz", "due_date": "15/09"}`
+    (Se não houver data, use "Sem data").
+
+-   **Para PAGAR uma dívida:**
+    `{"action": "pay_debt", "description": "conta de luz"}`
+
+-   **Para DEFINIR o saldo inicial:**
+    `{"action": "set_balance", "value": 2250.00}`
+
+-   **Para CONSULTAR o saldo:**
+    `{"action": "get_balance"}`
+
+-   **Para pedir o RESUMO FINANCEIRO:**
+    `{"action": "get_summary"}`
+
+-   **Para pedir um RELATÓRIO DE GASTOS:**
+    `{"action": "get_period_report", "period": "dia"}` (period pode ser "dia", "semana", ou "mês").
+
+-   **Para pedir o BALANÇO (entradas/saídas):**
+    `{"action": "get_io_summary", "period": "dia"}`
+
+-   **Para APAGAR o último gasto:**
+    `{"action": "delete_last"}`
     
-    if not best_match: return None
+-   **Para pedir uma DICA:**
+    `{"action": "get_tip"}`
 
-    # Lógica para formato brasileiro: remove '.' de milhar, depois troca ',' por '.' decimal.
-    standardized_value = best_match.replace('.', '').replace(',', '.')
+-   **Para ver a LISTA DE DÍVIDAS:**
+    `{"action": "get_debts"}`
     
-    try:
-        return float(standardized_value)
-    except (ValueError, IndexError):
-        return None
+-   **Se não entender ou for uma conversa normal:**
+    `{"action": "chat", "response": "ajuda"}`
 
-def extract_all_transactions_intelligent(text):
-    """Divide a frase em cláusulas e extrai uma transação de cada, sem quebrar números."""
-    transactions = []
-    # Regex atualizado para não dividir em uma vírgula seguida por 3 dígitos (evita quebrar milhares como 2,900)
-    clauses = re.split(r'\s+e\s+|\s+depois\s+|,\s*(?!\d{3})', text)
-    
-    for clause in clauses:
-        value = parse_monetary_value(clause)
-        if value is not None:
-            transactions.append({"value": value, "context": clause})
-            
-    return transactions
+**Exemplos de Interpretação:**
+- "meu saldo atual na conta é 2.250" -> `{"action": "set_balance", "value": 2250.00}`
+- "gastei 50 no mercado e 25,50 na farmácia" -> `{"action": "record_expense", "transactions": [{"value": 50.00, "description": "Mercado"}, {"value": 25.50, "description": "Farmácia"}]}`
+- "tenho uma conta de 150 para pagar dia 10/12" -> `{"action": "record_debt", "value": 150.00, "description": "Conta", "due_date": "10/12"}`
+- "qual meu saldo?" -> `{"action": "get_balance"}`
+- "oi tudo bem" -> `{"action": "chat", "response": "saudacao"}`
+"""
 
-def extract_due_date(text):
-    match = re.search(r'(\d{1,2}/\d{1,2})', text)
-    return match.group(0) if match else "Sem data"
-
-def clean_description(text, value):
-    """Isola o sujeito da transação de forma mais precisa."""
-    # Remove o valor monetário exato para não ser confundido com a descrição
-    if value is not None:
-        value_int = int(value)
-        # Formata o valor com ponto como separador de milhar e vírgula para decimal
-        formatted_value_br = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        text = text.replace(formatted_value_br, "")
-        text = text.replace(str(value), "")
-        text = text.replace(str(value_int), "")
-
-    # Remove frases e palavras de "ruído"
-    noise_patterns = [
-        r'\b(hoje|gastei|comprei|paguei|foi|deu|custou|no valor de|de)\b',
-        r'\b(recebi|salário|ganhei|depósito|rendimento|entrada)\b',
-        r'\b(dívida|conta|vence|vencimento|apagar|último|parcela|boleto)\b',
-        r'r\$', 'reais', r'\b(minha|meu|pro dia|com o)\b',
-        r'(\d{1,2}/\d{1,2})' # Remove a data
-    ]
-    for pattern in noise_patterns:
-        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-
-    # Limpeza final de espaços e caracteres indesejados
-    text = re.sub(r'\s+', ' ', text).strip(" ,.:;")
-    return text.capitalize() if text else "Gasto geral"
-
+# --- FUNÇÕES DE LÓGICA FINANCEIRA (A MAIORIA PERMANECE IGUAL) ---
+# Estas funções agora apenas EXECUTAM as ordens recebidas do Gemini.
 
 def infer_category(description):
     desc_lower = description.lower()
@@ -210,20 +137,15 @@ def write_to_csv(filepath, header, row):
         print(f"Erro de I/O ao escrever no arquivo {filepath}: {e}")
         return False
 
-# --- FUNÇÕES DE LÓGICA FINANCEIRA ---
-
 def get_balance(user_id):
     if not os.path.exists(CSV_SALDO): return 0.0
     with open(CSV_SALDO, 'r', encoding='utf-8') as file:
-        reader = csv.reader(file, delimiter=';')
-        try: next(reader, None)
-        except StopIteration: return 0.0
+        reader = csv.reader(file, delimiter=';'); next(reader, None)
         for row in reader:
             if row and row[0] == user_id: return float(row[1])
     return 0.0
 
 def set_balance(user_id, new_balance):
-    """Define ou sobrescreve o saldo do usuário."""
     lines = []; user_found = False
     if os.path.exists(CSV_SALDO):
         with open(CSV_SALDO, 'r', encoding='utf-8') as file: lines = file.readlines()
@@ -240,15 +162,14 @@ def set_balance(user_id, new_balance):
             elif line.strip(): file.write(line)
         if not user_found: file.write(f"{user_id};{new_balance:.2f}\n")
 
-def record_expense(user_id, value, description, update=True):
-    """Registra um gasto e retorna um dicionário com os detalhes."""
+def record_expense(user_id, value, description, update_balance=True):
     now = datetime.datetime.now(TIMEZONE)
     now_str_db = now.strftime("%Y-%m-%d %H:%M:%S")
     category = infer_category(description)
     header = ["UserID", "DataHora", "Descricao", "Valor", "Categoria"]
     row = [user_id, now_str_db, description, f"{value:.2f}", category]
     if write_to_csv(CSV_GASTOS, header, row):
-        if update:
+        if update_balance:
             current_balance = get_balance(user_id)
             set_balance(user_id, current_balance - value)
         return {"description": description, "value": value, "category": category}
@@ -256,9 +177,9 @@ def record_expense(user_id, value, description, update=True):
 
 def record_income(user_id, value, description):
     now = datetime.datetime.now(TIMEZONE)
-    now_str_db = now.strftime("%Y-%m-%d %H:%M:%S"); today_str_msg = now.strftime("%d/%m")
+    today_str_msg = now.strftime("%d/%m")
     header = ["UserID", "DataHora", "Descricao", "Valor"]
-    row = [user_id, now_str_db, description, f"{value:.2f}"]
+    row = [user_id, now.strftime("%Y-%m-%d %H:%M:%S"), description, f"{value:.2f}"]
     if write_to_csv(CSV_ENTRADAS, header, row):
         current_balance = get_balance(user_id)
         new_balance = current_balance + value
@@ -273,15 +194,13 @@ def record_debt(user_id, value, description, due_date):
         return f"🧾 Dívida registrada!\n- {description}: *R${value:.2f}*\n- Vencimento: {due_date}"
     return "❌ Ops, não consegui registrar sua dívida."
 
-def pay_debt(user_id, text):
+def pay_debt(user_id, search_desc):
     if not os.path.exists(CSV_DIVIDAS): return "Você não tem nenhuma dívida para pagar."
-    search_desc = re.sub(r'\b(paguei|a|o|conta|fatura|boleto|de|da|do)\b', '', text, flags=re.IGNORECASE).strip()
     lines = []; debt_found = None
     with open(CSV_DIVIDAS, 'r', encoding='utf-8') as file: lines = file.readlines()
     for i in range(len(lines) - 1, 0, -1):
-        line = lines[i].strip()
-        if line.startswith(user_id):
-            parts = line.split(';')
+        if lines[i].strip().startswith(user_id):
+            parts = lines[i].strip().split(';')
             if search_desc.lower() in parts[2].lower():
                 debt_found = {"index": i, "desc": parts[2], "value": float(parts[3])}
                 break
@@ -303,45 +222,30 @@ def delete_last_expense(user_id):
     deleted_line_parts = lines.pop(last_expense_index).strip().split(';')
     deleted_description = deleted_line_parts[2]; deleted_value = float(deleted_line_parts[3])
     with open(CSV_GASTOS, 'w', encoding='utf-8') as file: file.writelines(lines)
-    current_balance = get_balance(user_id)
-    new_balance = current_balance + deleted_value
+    new_balance = get_balance(user_id) + deleted_value
     set_balance(user_id, new_balance)
-    return f"🗑️ Último gasto apagado!\n- {deleted_description}: R${deleted_value:.2f}\nO valor foi devolvido ao seu saldo. Novo saldo: *R${new_balance:.2f}*."
-
-# --- FUNÇÕES DE RELATÓRIO ---
+    return f"🗑️ Último gasto apagado!\n- {deleted_description}: R${deleted_value:.2f}\nO valor foi devolvido. Novo saldo: *R${new_balance:.2f}*."
 
 def get_debts_report(user_id):
     if not os.path.exists(CSV_DIVIDAS): return "Você não tem nenhuma dívida registrada. Parabéns! 🎉"
-    report_lines = ["📋 *Suas Dívidas Pendentes* 📋\n"]
-    total_debts = 0.0
+    report_lines = ["📋 *Suas Dívidas Pendentes* 📋\n"]; total_debts = 0.0
     with open(CSV_DIVIDAS, 'r', encoding='utf-8') as file:
         reader = csv.reader(file, delimiter=';'); next(reader, None)
         for row in reader:
             if row and row[0] == user_id:
-                try:
-                    due_date, desc, value = row[1], row[2], float(row[3])
-                    report_lines.append(f"- {desc} (Vence: {due_date}): R${value:.2f}")
-                    total_debts += value
-                except (ValueError, IndexError): continue
+                due_date, desc, value = row[1], row[2], float(row[3])
+                report_lines.append(f"- {desc} (Vence: {due_date}): R${value:.2f}"); total_debts += value
     if len(report_lines) == 1: return "Você não tem nenhuma dívida registrada. Parabéns! 🎉"
     report_lines.append(f"\n*Total de Dívidas: R${total_debts:.2f}*")
     return "\n".join(report_lines)
 
-def get_total_debts(user_id):
-    if not os.path.exists(CSV_DIVIDAS): return 0.0
-    total = 0.0
-    with open(CSV_DIVIDAS, 'r', encoding='utf-8') as file:
-        reader = csv.reader(file, delimiter=';'); next(reader, None)
-        for row in reader:
-            if row and row[0] == user_id:
-                try: total += float(row[3])
-                except (ValueError, IndexError): continue
-    return total
-
 def get_financial_summary(user_id):
     balance = get_balance(user_id)
-    total_debts = get_total_debts(user_id)
+    total_debts = sum(float(row[3]) for row in csv.reader(open(CSV_DIVIDAS), delimiter=';') if row and row[0] == user_id) if os.path.exists(CSV_DIVIDAS) else 0.0
     return f"📊 *Resumo Financeiro*\n\n- Saldo em conta: *R${balance:.2f}*\n- Total de dívidas: *R${total_debts:.2f}*"
+
+# --- FUNÇÕES DE RELATÓRIO (CONTINUAM IGUAIS) ---
+# ... (get_period_report, get_io_summary) ...
 
 def get_period_report(user_id, period):
     if not os.path.exists(CSV_GASTOS): return "Nenhum gasto registrado ainda."
@@ -354,11 +258,9 @@ def get_period_report(user_id, period):
         reader = csv.reader(file, delimiter=';'); next(reader, None)
         for row in reader:
             if row and row[0] == user_id:
-                try:
-                    expense_date = datetime.datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S").date()
-                    if expense_date >= start_date:
-                        report_lines.append(f"- {row[2]}: R${float(row[3]):.2f}"); total_spent += float(row[3])
-                except (ValueError, IndexError): continue
+                expense_date = datetime.datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S").date()
+                if expense_date >= start_date:
+                    report_lines.append(f"- {row[2]}: R${float(row[3]):.2f}"); total_spent += float(row[3])
     if len(report_lines) == 1: return f"Você não teve gastos {period_name}. 🎉"
     report_lines.append(f"\n*Total gasto: R${total_spent:.2f}*")
     return "\n".join(report_lines)
@@ -373,21 +275,16 @@ def get_io_summary(user_id, period):
             reader = csv.reader(file, delimiter=';'); next(reader, None)
             for row in reader:
                 if row and row[0] == user_id:
-                    try:
-                        if datetime.datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S").date() >= start_date: total_out += float(row[3])
-                    except (ValueError, IndexError): continue
+                    if datetime.datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S").date() >= start_date: total_out += float(row[3])
     if os.path.exists(CSV_ENTRADAS):
         with open(CSV_ENTRADAS, 'r', encoding='utf-8') as file:
             reader = csv.reader(file, delimiter=';'); next(reader, None)
             for row in reader:
                 if row and row[0] == user_id:
-                    try:
-                        if datetime.datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S").date() >= start_date: total_in += float(row[3])
-                    except (ValueError, IndexError): continue
+                    if datetime.datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S").date() >= start_date: total_in += float(row[3])
     return f"💸 *Balanço {period_name}*\n\n- Entradas: *R${total_in:.2f}*\n- Saídas: *R${total_out:.2f}*"
 
 # --- FUNÇÃO DE ENVIO DE MENSAGEM ---
-
 def send_whatsapp_message(phone_number, message_text):
     if not all([ACCESS_TOKEN, PHONE_NUMBER_ID]): print("ERRO: Credenciais não configuradas."); return
     url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
@@ -398,116 +295,98 @@ def send_whatsapp_message(phone_number, message_text):
         print(f"Mensagem enviada para {phone_number}.")
     except requests.exceptions.RequestException as e: print(f"Erro ao enviar mensagem: {e}")
 
-# --- PROCESSADOR DE COMANDOS ---
+# --- PROCESSADOR DE COMANDOS COM GEMINI ---
+def process_message_with_llm(user_id, user_name, message_text):
+    if not model:
+        return "❌ Desculpe, meu cérebro de IA não está conectado agora. Por favor, verifique a configuração da API Key."
 
-def process_message(user_id, user_name, message_text):
-    """Função principal que interpreta a mensagem do usuário e decide qual ação tomar."""
-    
-    # --- EXPANSÃO MASSIVA DE COMANDOS (FORMAIS E INFORMAIS) ---
-    CMD_GET_SALDO = ["qual meu saldo", "ver saldo", "quanto tenho", "meu dinheiro", "dinheiro em conta", "grana", "ver a grana", "kd meu dinheiro", "quanto de dinheiro eu tenho"]
-    CMD_SET_SALDO = ["meu saldo é", "tenho na conta", "definir saldo", "saldo inicial", "começar com", "meu saldo atual é"]
-    CMD_RESUMO = ["resumo", "resumo financeiro", "visão geral", "como estou", "minhas finanças", "situação financeira", "meu status", "como estão as contas"]
-    CMD_APAGAR = ["apagar último", "excluir último", "cancelar último", "apaga o último", "deleta o último", "foi errado", "lancei errado"]
-    CMD_DICA = ["dica", "dica financeira", "me dê uma dica", "uma dica", "conselho", "me ajuda a economizar"]
-    CMD_GASTOS = ["gastos", "o que gastei", "relatório de gastos", "saídas", "minhas despesas", "onde gastei", "com o que gastei", "lista de gastos"]
-    CMD_BALANCO = ["entradas e saídas", "entrou e saiu", "balanço", "fluxo de caixa", "relatório de transações", "movimentações"]
-    CMD_REGISTRAR_DIVIDA = ["dívida", "divida", "parcela", "boleto", "conta", "vencimento", "tenho que pagar", "anota uma conta", "registra uma dívida"]
-    CMD_PAGAR_DIVIDA = ["paguei", "já paguei", "pagamento de", "quitei", "dar baixa"]
-    CMD_VER_DIVIDAS = ["minhas dívidas", "ver dívidas", "quais minhas contas", "o que devo", "lista de dívidas"]
-    
-    # 1. Comandos diretos e de alta prioridade
-    if any(cmd in message_text for cmd in ["ajuda", "comandos", "menu", "começar", "opções"]): return COMMANDS_MESSAGE
-    greetings = ["oi", "olá", "bom dia", "boa tarde", "boa noite", "e aí", "opa", "salve"]
-    if message_text.strip() in greetings: return f"Olá, {user_name}! Como posso te ajudar hoje? 😊"
-    
-    # --- LÓGICA DE SALDO REFEITA ---
-    value_in_message = parse_monetary_value(message_text)
-    
-    if any(cmd in message_text for cmd in CMD_SET_SALDO) and value_in_message is not None:
-        set_balance(user_id, value_in_message)
-        return f"✅ Saldo definido! Seu saldo atual é *R${value_in_message:.2f}*."
-
-    if any(cmd in message_text for cmd in CMD_GET_SALDO) and "saldo" in message_text:
-        return f"💵 Seu saldo atual é de *R${get_balance(user_id):.2f}*."
-
-    if any(cmd in message_text for cmd in CMD_RESUMO): return get_financial_summary(user_id)
-    if any(cmd in message_text for cmd in CMD_APAGAR): return delete_last_expense(user_id)
-    if any(cmd in message_text for cmd in CMD_DICA): return random.choice(FINANCIAL_TIPS)
-    if any(cmd in message_text for cmd in CMD_VER_DIVIDAS): return get_debts_report(user_id)
-
-    # 2. Comando de Pagar Dívida (prioridade alta)
-    if any(cmd in message_text for cmd in CMD_PAGAR_DIVIDA):
-        return pay_debt(user_id, message_text)
-
-    # 3. Comandos de Relatório com Período
-    if any(cmd in message_text for cmd in CMD_GASTOS):
-        if any(p in message_text for p in ["hoje", "hj", "de hoje"]): return get_period_report(user_id, "dia")
-        if "semana" in message_text: return get_period_report(user_id, "semana")
-        if "mês" in message_text: return get_period_report(user_id, "mês")
-    if any(cmd in message_text for cmd in CMD_BALANCO):
-        if any(p in message_text for p in ["hoje", "hj", "de hoje"]): return get_io_summary(user_id, "dia")
-        if "semana" in message_text: return get_io_summary(user_id, "semana")
-        if "mês" in message_text: return get_io_summary(user_id, "mês")
-
-    # --- LÓGICA DE TRANSAÇÃO RECONSTRUÍDA ---
-    
-    # 4. ANÁLISE DE INTENÇÃO PRIMEIRO
-    if any(keyword in message_text for keyword in CMD_REGISTRAR_DIVIDA):
-        value = parse_monetary_value(message_text)
-        if value is not None:
-            description = clean_description(message_text, value)
-            due_date = extract_due_date(message_text)
-            return record_debt(user_id, value, description, due_date)
-
-    # 5. Se não for dívida, procura por transações (gastos ou entradas)
-    transactions = extract_all_transactions_intelligent(message_text)
-    
-    if len(transactions) > 1:
-        today_str_msg = datetime.datetime.now(TIMEZONE).strftime("%d/%m")
-        response_lines = [f"Entendido! Registrei {len(transactions)} gastos para você em {today_str_msg}:"]
-        total_value = 0
-        for trans in transactions:
-            value = trans['value']
-            description = clean_description(trans['context'], value)
-            result_dict = record_expense(user_id, value, description, update=False)
-            if result_dict:
-                result_line = f"- {result_dict['description']}: *R${result_dict['value']:.2f}* ({result_dict['category']})"
-                response_lines.append(result_line)
-                total_value += value
+    try:
+        # Combina o prompt do sistema com a mensagem do usuário
+        full_prompt = f"{SYSTEM_PROMPT}\n\nMensagem do Usuário: \"{message_text}\""
         
-        current_balance = get_balance(user_id)
-        set_balance(user_id, current_balance - total_value)
-        response_lines.append(f"\nSeu novo saldo é *R${get_balance(user_id):.2f}*.")
-        return "\n".join(response_lines)
+        # Chama a API do Gemini
+        response = model.generate_content(full_prompt)
+        
+        # Limpa e converte a resposta para JSON
+        json_response_text = response.text.strip().replace("```json", "").replace("```", "")
+        action_data = json.loads(json_response_text)
+        action = action_data.get("action")
+        
+        print(f"Ação interpretada pelo Gemini: {action}")
 
-    if len(transactions) == 1:
-        value = transactions[0]['value']
-        description = clean_description(message_text, value)
-        
-        income_keywords = ["recebi", "salário", "ganhei", "depósito", "rendimento", "entrada", "pix", "me pagaram"]
-        if any(keyword in message_text for keyword in income_keywords):
-            if not description: description = "Entrada"
-            return record_income(user_id, value, description)
-        
-        # LÓGICA DE RESPOSTA DE GASTO ÚNICO CORRIGIDA
-        result = record_expense(user_id, value, description)
-        if result:
+        # Executa a ação correspondente
+        if action == "record_expense":
+            transactions = action_data.get("transactions", [])
+            if not transactions: return "Não consegui identificar os gastos. Pode tentar de novo?"
+            
             today_str_msg = datetime.datetime.now(TIMEZONE).strftime("%d/%m")
+            response_lines = [f"Entendido! Registrei {len(transactions)} transação(ões) para você em {today_str_msg}:"]
+            total_value = 0
+            
+            for trans in transactions:
+                result = record_expense(user_id, trans['value'], trans['description'], update_balance=False)
+                if result:
+                    response_lines.append(f"- {result['description']}: *R${result['value']:.2f}* ({result['category']})")
+                    total_value += result['value']
+            
             current_balance = get_balance(user_id)
-            return (
-                f"✅ Gasto registrado em {today_str_msg}!\n"
-                f"- {result['description']}: *R${result['value']:.2f}* ({result['category']})\n\n"
-                f"Seu novo saldo é *R${current_balance:.2f}*."
-            )
+            set_balance(user_id, current_balance - total_value)
+            response_lines.append(f"\nSeu novo saldo é *R${get_balance(user_id):.2f}*.")
+            return "\n".join(response_lines)
 
-    # 6. Se nada correspondeu, retorna mensagem de ajuda
-    return f"Não entendi, {user_name}. 🤔\n\n- Para *gastos*, tente: `gastei 20 no lanche`\n- Para *dívidas*, tente: `conta de luz 150 vence 10/09`\n- Para *entradas*, tente: `recebi 500`\n\nPara ver tudo, envie `comandos`."
+        elif action == "record_income":
+            return record_income(user_id, action_data['value'], action_data['description'])
+        
+        elif action == "record_debt":
+            return record_debt(user_id, action_data['value'], action_data['description'], action_data['due_date'])
 
-# --- WEBHOOK PRINCIPAL DA APLICAÇÃO ---
+        elif action == "pay_debt":
+            return pay_debt(user_id, action_data['description'])
+
+        elif action == "set_balance":
+            set_balance(user_id, action_data['value'])
+            return f"✅ Saldo definido! Seu saldo atual é *R${action_data['value']:.2f}*."
+
+        elif action == "get_balance":
+            return f"💵 Seu saldo atual é de *R${get_balance(user_id):.2f}*."
+
+        elif action == "get_summary":
+            return get_financial_summary(user_id)
+            
+        elif action == "get_period_report":
+            return get_period_report(user_id, action_data['period'])
+
+        elif action == "get_io_summary":
+            return get_io_summary(user_id, action_data['period'])
+
+        elif action == "delete_last":
+            return delete_last_expense(user_id)
+            
+        elif action == "get_tip":
+            return random.choice(FINANCIAL_TIPS)
+
+        elif action == "get_debts":
+            return get_debts_report(user_id)
+            
+        elif action == "chat":
+            response_type = action_data.get("response")
+            if response_type == "saudacao":
+                return f"Olá, {user_name}! Como posso te ajudar hoje? 😊"
+            else: # "ajuda" ou qualquer outro chat
+                return f"Não entendi. Se precisar de ajuda, envie `comandos`."
+
+        else:
+            return "Não consegui entender o seu pedido. Pode tentar de outra forma?"
+
+    except Exception as e:
+        print(f"!!! ERRO AO PROCESSAR COM O GEMINI: {e} !!!")
+        return "❌ Desculpe, tive um problema para entender o seu pedido. Tente ser mais específico, por favor."
+
+# --- WEBHOOK PRINCIPAL (AGORA CHAMA A FUNÇÃO DO LLM) ---
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
-        mode = request.args.get('hub.mode'); token = request.args.get('hub.verify_token'); challenge = request.args.get('hub.challenge')
+        mode, token, challenge = request.args.get('hub.mode'), request.args.get('hub.verify_token'), request.args.get('hub.challenge')
         if mode == 'subscribe' and token == VERIFY_TOKEN:
             print("WEBHOOK_VERIFIED"); return challenge, 200
         return 'Failed verification', 403
@@ -520,10 +399,14 @@ def webhook():
                 if message_data.get('type') != 'text': return 'EVENT_RECEIVED', 200
                 user_id = message_data['from']
                 user_name = data['entry'][0]['changes'][0]['value']['contacts'][0].get('profile', {}).get('name', 'Pessoa')
-                message_text = message_data['text']['body'].strip().lower()
+                message_text = message_data['text']['body'].strip()
+                
                 print(f"Recebida mensagem de {user_name} ({user_id}): '{message_text}'")
-                reply_message = process_message(user_id, user_name, message_text)
+                
+                # A grande mudança: chamamos o processador com LLM
+                reply_message = process_message_with_llm(user_id, user_name, message_text)
+                
                 if reply_message: send_whatsapp_message(user_id, reply_message)
-        except (KeyError, IndexError, TypeError) as e:
-            print(f"Erro ao processar webhook: {e}\nDados: {json.dumps(data, indent=2)}")
+        except Exception as e:
+            print(f"!!! ERRO CRÍTICO NO WEBHOOK: {e} !!!")
         return 'EVENT_RECEIVED', 200
