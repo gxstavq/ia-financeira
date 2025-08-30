@@ -410,3 +410,4 @@ def webhook():
         except Exception as e:
             print(f"!!! ERRO CRÍTICO NO WEBHOOK: {e} !!!")
         return 'EVENT_RECEIVED', 200
+        # Forçando novo deploy para ativar o Gemini
