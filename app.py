@@ -778,5 +778,4 @@ def webhook():
         return 'EVENT_RECEIVED', 200
 
 if __name__ == "__main__":
-    # Esta parte é para testes locais e não será usada no Render
-    app.run(debug=True, port=5001)
+# Forçando novo deploy para ativar o Gemini
