@@ -1,3 +1,5 @@
 gunicorn
 flask
 requests
+scikit-learn
+pandas
