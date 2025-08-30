@@ -1,27 +1,19 @@
-import pickle
-
-# Carrega modelo treinado e vetor
-intent_clf = pickle.load(open("intent_clf.pkl", "rb"))
-intent_vectorizer = pickle.load(open("intent_vectorizer.pkl", "rb"))
-
-def predict_intent(frase):
-    X_teste = intent_vectorizer.transform([frase])
-    return intent_clf.predict(X_teste)[0]
 from flask import Flask, request
 import os
 import unicodedata
 import re
 import requests
+import pickle
 
 app = Flask(__name__)
 
-# ==== CONFIGURAÇÕES DO META ====
+# ==== CONFIGURAÇÕES DO META (TROQUE PELOS SEUS DADOS!) ====
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN") or "SEU_ACCESS_TOKEN_AQUI"
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID") or "SEU_PHONE_NUMBER_ID_AQUI"
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN") or "SEU_VERIFY_TOKEN_AQUI"
-# ===============================
+# ==========================================================
 
-# ==== FUNÇÕES PARA CARREGAR FRASES ====
+# ==== FUNÇÃO DE NORMALIZAÇÃO ====
 def normalize_text(text):
     text = text.lower()
     text = unicodedata.normalize('NFKD', text)
@@ -29,27 +21,13 @@ def normalize_text(text):
     text = re.sub(r'[^\w\s]', '', text)
     return text.strip()
 
-def load_phrases(filename):
-    if not os.path.exists(filename):
-        print(f"Aviso: arquivo {filename} não encontrado.")
-        return []
-    with open(filename, encoding='utf-8') as f:
-        return [normalize_text(line) for line in f if line.strip() and not line.startswith('#')]
+# ==== CARREGA O MODELO DE INTENÇÃO ====
+intent_clf = pickle.load(open("intent_clf.pkl", "rb"))
+intent_vectorizer = pickle.load(open("intent_vectorizer.pkl", "rb"))
 
-def match_any_phrase(message, phrases):
-    msg = normalize_text(message)
-    for phrase in phrases:
-        if phrase in msg:
-            return True
-    return False
-
-# ==== CARREGUE SUAS FRASES ====
-GREETINGS = load_phrases('frases/greetings.txt')
-DIVIDAS = load_phrases('frases/dividas.txt')
-SALDO = load_phrases('frases/saldo.txt')
-DICA = load_phrases('frases/dica.txt')
-ORCAMENTO = load_phrases('frases/orcamento.txt')
-# Adicione outras listas se criar mais arquivos .txt
+def predict_intent(frase):
+    X_teste = intent_vectorizer.transform([frase])
+    return intent_clf.predict(X_teste)[0]
 
 # ==== RESPOSTAS PADRÃO ====
 RESPOSTA_GREETINGS = "Olá! Eu sou sua assistente financeira. Digite 'comandos' para ver o que eu faço! 😄"
@@ -89,8 +67,8 @@ def webhook():
             return 'Erro de verificação', 403
 
     if request.method == 'POST':
-        data = request.get_json()
         try:
+            data = request.get_json()
             entry = data['entry'][0]
             changes = entry['changes'][0]
             value = changes['value']
@@ -102,22 +80,22 @@ def webhook():
             user_id = message_data['from']
             original_message_text = message_data['text']['body'].strip()
             message_text = normalize_text(original_message_text)
-            
-            # DECISÃO DE INTENÇÃO
-intent = predict_intent(message_text)
 
-if intent == "greetings":
-    reply_message = RESPOSTA_GREETINGS
-elif intent == "dividas":
-    reply_message = RESPOSTA_DIVIDAS
-elif intent == "saldo":
-    reply_message = RESPOSTA_SALDO
-elif intent == "dica":
-    reply_message = RESPOSTA_DICA
-elif intent == "orcamento":
-    reply_message = RESPOSTA_ORCAMENTO
-else:
-    reply_message = "Desculpe, não entendi! Digite 'comandos' para ver o que eu sei fazer. 😅"
+            # IA: previsão de intenção
+            intent = predict_intent(message_text)
+
+            if intent == "greetings":
+                reply_message = RESPOSTA_GREETINGS
+            elif intent == "dividas":
+                reply_message = RESPOSTA_DIVIDAS
+            elif intent == "saldo":
+                reply_message = RESPOSTA_SALDO
+            elif intent == "dica":
+                reply_message = RESPOSTA_DICA
+            elif intent == "orcamento":
+                reply_message = RESPOSTA_ORCAMENTO
+            else:
+                reply_message = "Desculpe, não entendi! Digite 'comandos' para ver o que eu sei fazer. 😅"
 
             if reply_message:
                 send_whatsapp_message(user_id, reply_message)
