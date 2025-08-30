@@ -3,14 +3,20 @@ from db import get_db, create_tables
 import re
 from datetime import datetime
 import os
+import requests
 
 app = Flask(__name__)
 create_tables()
 
+# Variáveis de ambiente do Render (mantenha o que já tem configurado!)
+ACCESS_TOKEN = os.getenv("ACCESS_TOKEN") or "SEU_ACCESS_TOKEN"
+PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID") or "SEU_PHONE_ID"
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN") or "TOKEN123"
+
 def parse_transaction(text):
     """
     Recebe frase tipo 'academia 120', 'recebi salário 2000', 'paguei ifood 37,67'
-    e retorna (tipo, categoria, valor, data, descricao)
+    e retorna dict com tipo, categoria, valor, data, descricao
     """
     text = text.lower()
     valor_match = re.search(r'([0-9]+(?:[.,][0-9]{1,2})?)', text)
@@ -27,10 +33,10 @@ def parse_transaction(text):
     else:
         data = datetime.now().date()
     
-    # Categoria
+    # Categoria e tipo (básico, pode evoluir depois)
     palavras_receita = ["recebi", "salario", "depósito", "deposito", "entrou", "ganhei", "receita"]
     palavras_divida = ["divida", "dívida", "pagar", "emprestimo", "empréstimo"]
-    palavras_despesa = ["paguei", "gastei", "comprei", "compra", "pago", "paguei", "gastou"]
+    palavras_despesa = ["paguei", "gastei", "comprei", "compra", "pago", "gastou"]
     tipo = "despesa"
     for p in palavras_receita:
         if p in text:
@@ -68,7 +74,6 @@ def registrar_transacao(user_id, transacao):
 def resumo_usuario(user_id):
     conn = get_db()
     c = conn.cursor()
-    # Saldo = receitas - despesas
     c.execute('SELECT COALESCE(SUM(valor),0) FROM transacoes WHERE user_id=? AND tipo="receita"', (user_id,))
     total_receita = c.fetchone()[0]
     c.execute('SELECT COALESCE(SUM(valor),0) FROM transacoes WHERE user_id=? AND tipo="despesa"', (user_id,))
@@ -99,13 +104,29 @@ def resposta_ajuda():
         "• E muito mais! Tente frases livres 😉"
     )
 
+def send_whatsapp_message(phone_number, message_text):
+    url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "messaging_product": "whatsapp",
+        "to": phone_number,
+        "text": {"body": message_text}
+    }
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+    except Exception as e:
+        print("Erro ao enviar mensagem:", e)
+
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == 'GET':
-        # Para o webhook do Meta
         token = request.args.get('hub.verify_token')
         challenge = request.args.get('hub.challenge')
-        if token == os.getenv("VERIFY_TOKEN", "TOKEN123"):
+        if token == VERIFY_TOKEN:
             return challenge, 200
         return "Verificação falhou", 403
 
@@ -120,7 +141,7 @@ def webhook():
             user_id = message_data['from']
             message_text = message_data['text']['body'].strip().lower()
 
-            # Lógica de intenção
+            # Lógica de intenção inteligente
             if re.match(r"^(comando|ajuda|menu|start)", message_text):
                 resp = resposta_ajuda()
             elif "saldo" in message_text:
@@ -143,7 +164,6 @@ def webhook():
                 else:
                     resp = "📝 Orçamento por categoria:\n" + "\n".join([f"• {cat}: R${valor:.2f}" for cat, valor in despesas_cat])
             elif re.match(r".*\d", message_text):
-                # Tenta registrar transação (qualquer coisa com número na frase)
                 transacao = parse_transaction(message_text)
                 if transacao:
                     registrar_transacao(user_id, transacao)
@@ -154,8 +174,7 @@ def webhook():
             else:
                 resp = resposta_ajuda()
 
-            # Aqui você envia a resp via WhatsApp (adicione sua própria função se quiser)
-            print(f"Mensagem para {user_id}: {resp}")
+            send_whatsapp_message(user_id, resp)
 
         except Exception as e:
             print("Erro no webhook:", e)
