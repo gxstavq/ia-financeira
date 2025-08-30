@@ -1,739 +1,499 @@
-# -*- coding: utf-8 -*-
-
 # Importa as ferramentas necessárias
-import os
+from flask import Flask, request
 import json
 import requests
 import datetime
+import os
 import csv
-import re
-import random
-from flask import Flask, request
+import re # Importado para a análise de texto
+import random # Importado para as dicas financeiras
 from collections import defaultdict
+import unicodedata  # Adicionado para normalização de texto (remoção de acentos)
 
-# --- CONFIGURAÇÃO DA APLICAÇÃO FLASK ---
+# Cria a aplicação
 app = Flask(__name__)
 
-# --- CREDENCIAIS (CARREGADAS DO AMBIENTE) ---
+# --- SUAS CREDENCIAIS ---
+# É recomendado que estas variáveis de ambiente sejam configuradas no seu serviço de hospedagem
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
+# --- FIM DAS CREDENCIAIS ---
 
-# --- CONFIGURAÇÃO DOS ARQUIVOS DE DADOS ---
-# Garante que o diretório de dados exista
+# Configuração do disco persistente
 DATA_DIR = os.getenv('RENDER_DISK_PATH', '.')
-if not os.path.exists(DATA_DIR):
-    os.makedirs(DATA_DIR)
-
-CSV_GASTOS = os.path.join(DATA_DIR, "gastos_usuarios.csv")
-CSV_ENTRADAS = os.path.join(DATA_DIR, "entradas_usuarios.csv")
-CSV_SALDO = os.path.join(DATA_DIR, "saldo_usuarios.csv")
-CSV_DIVIDAS = os.path.join(DATA_DIR, "dividas_usuarios.csv")
-
-# Define o fuso horário para o Brasil (Brasília)
+CSV_FILE_NAME = os.path.join(DATA_DIR, "meus_gastos.csv")
+PAGAMENTOS_FILE_NAME = os.path.join(DATA_DIR, "pagamentos.csv")
+SALDO_FILE_NAME = os.path.join(DATA_DIR, "saldo.csv")
+DIVIDAS_FILE_NAME = os.path.join(DATA_DIR, "dividas.csv")
+ORCAMENTO_FILE_NAME = os.path.join(DATA_DIR, "orcamento.csv")
+METAS_FILE_NAME = os.path.join(DATA_DIR, "metas.csv")
+RECORRENTES_FILE_NAME = os.path.join(DATA_DIR, "recorrentes.csv")
 TIMEZONE = datetime.timezone(datetime.timedelta(hours=-3))
 
-# --- INTELIGÊNCIA DA IA: EXPANSÃO MASSIVA DE CATEGORIAS E PALAVRAS-CHAVE ---
-# Esta seção é o cérebro da categorização. Contém centenas de palavras, marcas e gírias
-# para identificar com precisão para onde o dinheiro do usuário está indo.
+# Função para normalizar texto (remover acentos e converter para minúsculas)
+def normalize_text(text):
+    text = text.lower()
+    text = unicodedata.normalize('NFKD', text)
+    text = ''.join(c for c in text if not unicodedata.combining(c))
+    return text
+
+# Dicionário de palavras-chave expandido com mais termos, incluindo informais e variações
 CATEGORY_KEYWORDS = {
-    "Alimentação": [
-        "restaurante", "almoço", "janta", "jantar", "ifood", "rappi", "uber eats", "mercado", "comida", "lanche", "pizza", "hamburguer",
-        "padaria", "café", "starbucks", "sorvete", "açaí", "supermercado", "hortifruti", "sacolão", "feira", "açougue",
-        "peixaria", "doces", "bolo", "salgado", "esfiha", "pastel", "churrasco", "bebida", "refrigerante", "coca-cola",
-        "cerveja", "vinho", "suco", "água", "energético", "quitanda", "mercearia", "conveniência", "delivery",
-        "marmita", "quentinha", "sushi", "temaki", "japonês", "chinês", "italiano", "mexicano", "árabe",
-        "pão", "leite", "queijo", "presunto", "frutas", "verduras", "legumes", "carne", "frango", "peixe",
-        "ovos", "arroz", "feijão", "macarrão", "molho", "biscoito", "bolacha", "chocolate", "bombom", "cereal", "chiclete",
-        "barzinho", "boteco", "petisco", "tira-gosto", "happy hour", "mcdonalds", "burger king", "bk", "subway",
-        "kfc", "giraffas", "habibs", "sadia", "seara", "perdigão", "nestle", "garoto", "lacta", " Bauducco", "piraquê",
-        "carrefour", "pão de açúcar", "extra", "atacadao", "assai", "big", "gbarbosa", "zona sul", "hortifruti",
-        "churrascaria", "rodízio", "self-service", "quilo", "kg", "cafeteria", "confeitaria", "doceria", "rotisseria"
-    ],
-    "Transporte": [
-        "uber", "99", "táxi", "gasolina", "etanol", "diesel", "gnv", "combustível", "posto", "ipiranga", "shell", "petrobras",
-        "metrô", "ônibus", "trem", "passagem", "estacionamento", "pedágio", "rodízio", "multa", "ipva", "licenciamento",
-        "seguro do carro", "mecânico", "oficina", "troca de óleo", "pneu", "manutenção do carro", "revisão",
-        "lavagem", "lava-rápido", "aluguel de carro", "movida", "localiza", "unidas", "passagem aérea", "latam", "gol", "azul",
-        "aeroporto", "rodoviária", "barca", "balsa", "frete", "carreto", "recarga bilhete único", "cartão top", "giro",
-        "app de transporte", "cabify", "buser", "flixbus", "aplicativo de onibus", "viacao 1001", "cometa", "itapemirim"
-    ],
-    "Moradia": [
-        "aluguel", "condomínio", "luz", "água", "internet", "gás", "iptu", "diarista", "faxineira", "limpeza",
-        "reforma", "manutenção", "conserto", "eletricista", "encanador", "pintor", "marceneiro", "material de construção",
-        "tinta", "cimento", "areia", "ferramenta", "leroy merlin", "telhanorte", "cec", "decoração", "móvel", "sofá", "cama",
-        "mesa", "cadeira", "eletrodoméstico", "geladeira", "fogão", "microondas", "máquina de lavar", "tv a cabo", "net",
-        "claro", "vivo", "tim", "oi", "segurança", "alarme", "telefonia", "conta de celular", "plano de celular",
-        "ikea", "tok&stok", "etna", "mobly", "dedetização", "desentupidor", "jardinagem", "piscineiro"
-    ],
-    "Saúde e Bem-estar": [
-        "farmácia", "drogasil", "droga raia", "pacheco", "panvel", "remédio", "medicamento", "dorflex", "neosaldina",
-        "médico", "consulta", "plano de saúde", "convênio", "amil", "bradesco saude", "sulamerica", "unimed",
-        "academia", "smart fit", "bluefit", "bodytech", "suplemento", "whey", "creatina", "dentista", "aparelho",
-        "exame", "laboratório", "terapia", "psicólogo", "fisioterapia", "pilates", "yoga", "nutricionista",
-        "oftalmologista", "óculos de grau", "lente de contato", "hospital", "pronto-socorro", "emergência",
-        "massagem", "acupuntura", "plano odontológico", "odonto"
-    ],
-    "Cuidados Pessoais": [
-        "cabeleireiro", "barbeiro", "corte de cabelo", "manicure", "pedicure", "salão de beleza", "sobrancelha",
-        "depilação", "estética", "perfume", "boticario", "natura", "sephora", "creme", "hidratante", "shampoo",
-        "condicionador", "sabonete", "desodorante", "maquiagem", "batom", "base", "rímel", "protetor solar",
-        "cosméticos", "barbearia", "esmalte"
-    ],
-    "Lazer e Entretenimento": [
-        "cinema", "show", "teatro", "concerto", "bar", "balada", "festa", "viagem", "hotel", "pousada", "hostel", "airbnb",
-        "booking", "passagem de avião", "streaming", "spotify", "netflix", "hbo", "disney+", "amazon prime", "youtube premium",
-        "globoplay", "jogo", "game", "steam", "playstation", "psn", "xbox", "nintendo", "ingresso", "passeio", "parque",
-        "praia", "clube", "hobby", "instrumento musical", "artesanato", "dança", "luta", "esporte", "futebol",
-        "ingresso de jogo", "livraria", "gibis", "hq", "show", "festival", "lollapalooza", "rock in rio", "rolê"
-    ],
-    "Compras e Vestuário": [
-        "roupa", "roupas", "tênis", "sapato", "bota", "sandália", "chinelo", "camiseta", "camisa", "blusa", "calça",
-        "bermuda", "short", "saia", "vestido", "casaco", "jaqueta", "moletom", "terno", "blazer", "gravata",
-        "meia", "cueca", "calcinha", "sutiã", "pijama", "biquíni", "sunga", "maiô", "acessório", "bolsa",
-        "carteira", "cinto", "chapéu", "boné", "gorro", "cachecol", "luva", "óculos", "relógio", "joia",
-        "brinco", "colar", "pulseira", "anel", "lavanderia", "costureira", "ajuste de roupa", "sapataria",
-        "shopping", "loja de departamento", "renner", "c&a", "riachuelo", "zara", "nike", "adidas", "shein", "shopee",
-        "mercado livre", "amazon", "aliexpress", "fast shop", "magazine luiza", "magalu", "casas bahia", "ponto"
-    ],
-    "Educação": [
-        "curso", "livro", "ebook", "kindle", "faculdade", "universidade", "mensalidade", "material escolar", "caderno",
-        "caneta", "lápis", "mochila", "escola", "colégio", "aula particular", "professor", "palestra", "udemy",
-        "coursera", "alura", "workshop", "seminário", "inscrição", "concurso", "certificação", "idiomas", "inglês", "espanhol"
-    ],
-    "Pets": [
-        "pet shop", "ração", "veterinário", "vacina do pet", "banho e tosa", "antipulgas", "vermífugo",
-        "brinquedo para pet", "areia para gato", "petz", "cobasi", "coleira", "consulta vet"
-    ],
-    "Presentes e Doações": [
-        "presente", "lembrancinha", "doação", "caridade", "contribuição", "ong", "presente de aniversário", "cesta básica"
-    ],
-    "Investimentos e Finanças": [
-        "investimento", "ações", "c CDB", "tesouro direto", "fundo imobiliário", "fii", "criptomoeda", "bitcoin",
-        "ethereum", "corretora", "xp", "rico", "clear", "nuinvest", "taxa", "juros", "empréstimo", "financiamento",
-        "iof", "transferência", "ted", "doc", "tarifa bancária"
-    ],
+    "Alimentação": ["restaurante", "almoço", "janta", "ifood", "rappi", "mercado", "comida", "lanche", "pizza", "hamburguer", "padaria", "café", "sorvete", "açaí", "supermercado", "refeicao", "almoco", "jantinha", "lanx", "pizzaria", "burguer", "acai", "doces", "salgados", "frutas", "vegetais", "carnes", "pao", "queijo", "leite", "iogurte", "refri", "cerveja", "vinho", "agua", "suco", "cha", "almocinho", "jantarzinho"],
+    "Transporte": ["uber", "99", "táxi", "gasolina", "metrô", "ônibus", "passagem", "estacionamento", "escritorio", "combustível", "pedágio", "rodízio", "moto", "taxi", "onibus", "metro", "carro", "bicicleta", "patinete", "van", "trem", "aviao", "barco", "combustivel", "oleo", "manutencao carro", "ipva", "licenciamento", "seguro carro", "multa", "transporte publico", "cartao transporte", "uber black", "99 pop", "inDriver"],
+    "Moradia": ["aluguel", "condomínio", "luz", "água", "internet", "gás", "iptu", "diarista", "limpeza", "reforma", "manutenção", "conta", "aluguelzinho", "condominio", "energia", "agua", "net", "gas", "faxina", "reforminha", "consertos", "casa", "apto", "imovel", "telefone fixo", "tv a cabo", "netflix casa", "spotify casa", "alarmes", "seguranca", "jardim", "piscina", "elevador", "porteiro"],
+    "Lazer": ["cinema", "show", "bar", "festa", "viagem", "streaming", "spotify", "netflix", "jogo", "ingresso", "passeio", "clube", "hobby", "balada", "pub", "rolê", "viagenzinha", "filme", "serie", "musica", "game", "videogame", "futebol", "esporte", "ginastica", "praia", "piscina lazer", "churrasco", "amigos", "familia", "aniversario", "casamento", "ferias", "hotel", "airbnb", "passeios", "turismo"],
+    "Saúde": ["farmácia", "remédio", "médico", "consulta", "plano", "academia", "suplemento", "dentista", "exame", "terapia", "farmacia", "remedio", "medico", "plano saude", "gym", "vitamina", "odontologo", "psicologo", "fisioterapia", "nutricionista", "oftalmologista", "hospital", "cirurgia", "vacina", "checkup", "massagem", "yoga", "pilates", "corrida", "saude mental", "remedios naturais", "suplementos alimentares"],
+    "Compras": ["roupa", "roupas", "tênis", "sapato", "presente", "shopping", "online", "eletrônicos", "celular", "computador", "acessório", "decoração", "livraria", "tenis", "sapatos", "presentinho", "comprinhas", "eletrodomesticos", "fone", "headphone", "mouse", "teclado", "monitor", "tv", "geladeira", "fogao", "microondas", "maquina lavar", "joias", "bolsa", "mochila", "oculos", "relogio", "perfume", "maquiagem"],
+    "Educação": ["curso", "livro", "faculdade", "material", "escola", "aula", "palestra", "cursinho", "livros", "facul", "materiais escolares", "escolinha", "aulas", "workshop", "seminario", "certificacao", "idiomas", "ingles", "espanhol", "online course", "udemy", "coursera", "livraria escola", "caderno", "caneta", "mochila escola", "uniforme", "mensalidade", "matricula", "prova", "exame vestibular"],
+    "Essenciais": ["aluguel", "condomínio", "luz", "água", "internet", "gás", "iptu", "mercado", "farmácia", "plano", "metrô", "ônibus", "combustível", "faculdade", "escola", "basico", "necessario", "essencial", "contas basicas", "morar", "viver", "sobrevivencia"],
+    "Desejos": ["restaurante", "ifood", "rappi", "lanche", "pizza", "cinema", "show", "bar", "festa", "viagem", "streaming", "jogo", "roupas", "tênis", "presente", "shopping", "uber", "99", "táxi", "hobby", "luxo", "diversao", "prazer", "gostos", "caprichos", "mimos", "extras"],
+    "Outros": ["outro", "diversos", "miscelanea", "nao categorizado", "geral"]  # Adicionada categoria fallback expandida
 }
 
-# --- MENSAGENS E DICAS ---
+# Mensagem de ajuda expandida com mais exemplos formais e informais
 COMMANDS_MESSAGE = """
-Olá! Sou sua assistente financeira pessoal. 💸
+Olá! Sou a sua assistente financeira. 😊
+Você pode falar comigo de forma natural! Tente coisas como:
 
-Você pode falar comigo como se estivesse conversando com alguém!
+- `gastei 25,50 no almoço` ou `almoco 25,5`
+- `recebi meu pagamento de 2.500,08` ou `salario entrou 2500`
+- `dívida luz 180` ou `conta luz vence dia 15 180`
+- `paguei a conta de luz` ou `quitei luz`
+- `qual o meu saldo?` ou `quanto sobrou?`
+- `quanto entrou e saiu hoje?` ou `balanço do dia`
+- `dica financeira` ou `me da uma dica de grana`
 
-*Exemplos do que você pode me dizer:*
-- `gastei 25,50 no almoço no shopping`
-- `comprei um tênis na nike por 350 e um livro de 50`
-- `recebi 3500 do salário`
-- `acabei de ganhar uma caixinha no valor de 50 reais`
-- `tenho uma conta de luz de 180 que vence 15/09`
-- `paguei a conta de luz`
-- `qual meu saldo?`
-- `o que gastei hoje?`
-- `quanto gastei com alimentação esse mês?`
+Aqui estão alguns dos comandos que eu entendo (tem muuuitos mais, formais e informais!):
 
-*Principais Comandos:*
-📊 *RELATÓRIOS*
-- `saldo`: Para ver seu saldo atual.
-- `resumo financeiro`: Visão geral com saldo e dívidas.
-- `gastos hoje` (ou `semana`/`mês`): Lista seus gastos.
-- `gastos por categoria hoje` (ou `semana`/`mês`): Mostra gastos agrupados.
-- `entradas e saídas hoje` (ou `semana`/`mês`): Mostra o balanço.
-- `minhas dívidas`: Lista suas dívidas pendentes.
+💰 **Orçamento e Metas**
+- `definir rendimento [valor]` ou `meu salario eh [valor]`
+- `meu orçamento` ou `como ta meu budget?`
+- `definir meta [descricao] [valor]` ou `quero poupar pra [descricao] [valor]`
+- `minhas metas` ou `quais metas eu tenho?`
 
-⚙️ *AÇÕES*
-- `apagar último gasto`: Remove o último gasto registrado.
-- `paguei [descrição da dívida]`: Marca uma dívida como paga e registra o gasto.
-- `meu saldo é [valor]`: Define ou corrige seu saldo inicial.
-- `dica`: Te dou uma dica financeira.
+📊 **Análises e Relatórios**
+- `resumo financeiro` ou `visao geral da grana`
+- `comparar gastos` ou `compara mes passado`
+- `gastos da [semana/mês/dia]` ou `o q gastei nessa semana?`
+- `entradas e saídas [hoje/semana/mês]` ou `quanto entrou e saiu no mes?`
+- `minhas dívidas` ou `o q eu devo?`
 
-Qualquer dúvida, é só chamar! 😊
+💡 **Outros**
+- `dica financeira` ou `dica pra economizar`
+- `apagar último gasto` ou `exclui o ultimo`
+- `adicionar recorrente [descricao] [valor] [frequencia]` ou `todo mes [descricao] [valor]`
+- `meus recorrentes` ou `gastos fixos?`
 """
-FINANCIAL_TIPS = [
-    "Anote todos os seus gastos, até os pequenos. Isso te ajuda a entender para onde seu dinheiro está indo.", "Crie um orçamento mensal. A regra 50/30/20 (50% necessidades, 30% desejos, 20% poupança) é um bom começo!", "Antes de uma compra por impulso, espere 24 horas. Muitas vezes, a vontade passa e você economiza.", "Tenha uma reserva de emergência. O ideal é ter o equivalente a 3 a 6 meses do seu custo de vida guardado.", "Compare preços antes de comprar. A internet facilita muito a pesquisa e a economia.", "Evite usar o cartão de crédito para compras do dia a dia. É mais fácil perder o controle dos gastos assim.", "Defina metas financeiras claras, como 'guardar R$1000 para uma viagem'. Metas te mantêm motivado.", "Revise suas assinaturas e serviços recorrentes. Você realmente usa todos eles?", "Automatize seus investimentos. Configure transferências mensais para sua corretora para não 'esquecer' de investir."
-]
 
-# --- FUNÇÕES AUXILIARES DE INTERPRETAÇÃO DE TEXTO (NLP) ---
+# --- Funções da IA ---
 
-def parse_monetary_value(text):
-    """Extrai o valor monetário mais provável de um texto."""
-    if not isinstance(text, str): return None
-    # Padrão aprimorado para capturar valores como 1.234,56 ou 1234.56 ou 1.234 ou 1234
-    pattern = r'(?:R\$\s*)?(\d{1,3}(?:\.?\d{3})*(?:,\d{1,2})?|\d+(?:\.\d{1,2})?)'
-    matches = re.findall(pattern, text)
-    if not matches: return None
-
-    # Lógica para encontrar o melhor match, priorizando valores completos
-    best_match = ""
-    max_digits = 0
-    for m in matches:
-        num_digits = len(re.sub(r'\D', '', m))
-        if num_digits > max_digits:
-            max_digits = num_digits
-            best_match = m
-
-    if not best_match: return None
+def parse_value_string(s):
+    if not isinstance(s, str): return float(s)
+    s = s.replace('R$', '').strip()
     
-    # Padroniza o valor para o formato float (ex: "1.234,56" -> 1234.56)
-    standardized_value = best_match.replace('.', '').replace(',', '.')
+    if ',' not in s and '.' not in s:
+        return float(s)
     
-    # Corrige casos como "1.234" que viram "1234" (deve ser 1234.00)
-    if '.' in best_match and ',' not in best_match:
-        parts = standardized_value.split('.')
-        # Se a última parte tem 3 dígitos e não há vírgula, provavelmente é milhar, não centavos
+    if ',' in s:
+        s = s.replace('.', '').replace(',', '.')
+    elif '.' in s:
+        parts = s.split('.')
         if len(parts[-1]) == 3 and len(parts) > 1:
-            standardized_value = "".join(parts)
+            s = s.replace('.', '')
+    return float(s)
 
-    try:
-        return float(standardized_value)
-    except (ValueError, IndexError):
-        return None
-
-def extract_all_transactions(text):
-    """Divide a frase em cláusulas e extrai uma transação de cada."""
-    transactions = []
-    # Divide por "e", "depois", vírgulas (que não sejam de milhares)
-    clauses = re.split(r'\s+e\s+|\s+depois\s+|,\s*(?!\d{3})', text)
-    for clause in clauses:
-        value = parse_monetary_value(clause)
-        if value is not None:
-            transactions.append({"value": value, "context": clause})
-    return transactions
-
-def extract_due_date(text):
-    """Extrai uma data no formato DD/MM."""
-    match = re.search(r'(\d{1,2}/\d{1,2})', text)
-    if match:
-        return match.group(0)
-    
-    # Tenta extrair "dia 15", "dia 05"
-    match_dia = re.search(r'\b(dia|vence)\s+(\d{1,2})\b', text)
-    if match_dia:
-        day = int(match_dia.group(2))
-        now = datetime.datetime.now(TIMEZONE)
-        month = now.month
-        # Se o dia já passou neste mês, assume que é para o próximo
-        if day < now.day:
-            month = now.month + 1 if now.month < 12 else 1
-        return f"{day:02d}/{month:02d}"
-        
-    return "Sem data"
-
-def clean_description(text, value):
-    """Limpa a descrição removendo ruídos e palavras-chave de comando."""
-    if value is not None:
-        # Remove o valor monetário em vários formatos (1.234,56, 1234.56, 1234,56)
-        formatted_value_br = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        text = text.replace(formatted_value_br, "")
-        text = text.replace(f"{value:.2f}", "")
-        text = text.replace(str(int(value) if value.is_integer() else value), "")
-
-    # Lista expandida de ruídos
-    noise_patterns = [
-        # Gatilhos de gasto/entrada
-        r'\b(gastei|comprei|paguei|foi|deu|custou|no valor de|de|acabei de pedir|passei no cartao|um pix de)\b',
-        r'\b(recebi|salário|ganhei|depósito|rendimento|entrada|caixinha|gorjeta|um pix na conta|caiu na conta)\b',
-        r'\b(dívida|conta|vence|vencimento|apagar|último|parcela|boleto|fatura)\b',
-        # Palavras de preenchimento
-        r'r\$', r'\breais\b', r'\b(minha|meu|pra|pro|para|a|o|em|no|na|com|um|uma)\b',
-        # Data
-        r'(\d{1,2}/\d{1,2})', r'\b(dia|vence)\s+\d{1,2}\b'
-    ]
-    for pattern in noise_patterns:
-        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-    
-    text = re.sub(r'\s+', ' ', text).strip(" ,.:;-")
-    return text.capitalize() if text else "Gasto geral"
-
-def infer_category(description):
-    """Deduz a categoria do gasto com base na descrição."""
-    desc_lower = description.lower()
-    for category, keywords in CATEGORY_KEYWORDS.items():
-        if any(keyword in desc_lower for keyword in keywords):
-            return category
-    return "Outros"
-
-# --- FUNÇÕES DE LÓGICA FINANCEIRA (PERSISTÊNCIA EM CSV) ---
-
-def write_to_csv(filepath, header, row):
-    """Função genérica para escrever uma linha em um arquivo CSV."""
-    file_exists = os.path.exists(filepath)
-    try:
-        with open(filepath, 'a', newline='', encoding='utf-8') as file:
-            writer = csv.writer(file, delimiter=';')
-            if not file_exists or os.path.getsize(filepath) == 0:
-                writer.writerow(header)
-            writer.writerow(row)
-        return True
-    except IOError as e:
-        print(f"Erro de I/O ao escrever em {filepath}: {e}")
-        return False
-
-def get_balance(user_id):
-    """Lê o saldo atual do usuário no arquivo CSV."""
-    if not os.path.exists(CSV_SALDO): return 0.0
-    try:
-        with open(CSV_SALDO, 'r', encoding='utf-8') as file:
-            reader = csv.reader(file, delimiter=';')
-            next(reader, None)  # Pula o cabeçalho
-            for row in reader:
-                if row and row[0] == user_id:
-                    return float(row[1])
-    except (IOError, StopIteration) as e:
-        print(f"Erro ao ler saldo: {e}")
-        return 0.0
-    return 0.0
-
-def set_balance(user_id, new_balance):
-    """Atualiza ou define o saldo de um usuário no arquivo CSV."""
-    lines, user_found = [], False
-    header = "UserID;Saldo\n"
-    if os.path.exists(CSV_SALDO):
+def extract_all_monetary_values(text):
+    pattern = r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+)'
+    matches = re.findall(pattern, text)
+    if not matches: return []
+    values = []
+    for match in matches:
         try:
-            with open(CSV_SALDO, 'r', encoding='utf-8') as file:
-                lines = file.readlines()
-        except IOError as e:
-            print(f"Erro ao ler arquivo de saldo para atualização: {e}")
-            
-    try:
-        with open(CSV_SALDO, 'w', encoding='utf-8') as file:
-            if not lines or not lines[0].strip().lower().startswith("userid"):
-                file.write(header)
-                if lines: # Se havia algo, mas sem cabeçalho, reescreve
-                    file.writelines(l for l in lines if l.strip())
-            else:
-                file.write(lines[0]) # Escreve o cabeçalho existente
+            values.append(parse_value_string(match))
+        except (ValueError, IndexError): continue
+    return values
 
-            for line in lines[1:]: # Itera a partir da segunda linha
-                if line.strip():
-                    if line.startswith(user_id + ';'):
-                        file.write(f"{user_id};{new_balance:.2f}\n")
-                        user_found = True
-                    else:
-                        file.write(line)
-
-            if not user_found:
-                file.write(f"{user_id};{new_balance:.2f}\n")
-    except IOError as e:
-        print(f"Erro ao escrever novo saldo: {e}")
-
-
-def record_expense(user_id, value, description, update_balance=True):
-    """Registra um novo gasto."""
-    now = datetime.datetime.now(TIMEZONE)
-    category = infer_category(description)
-    row = [user_id, now.strftime("%Y-%m-%d %H:%M:%S"), description, f"{value:.2f}", category]
-    
-    if write_to_csv(CSV_GASTOS, ["UserID", "DataHora", "Descricao", "Valor", "Categoria"], row):
-        if update_balance:
-            set_balance(user_id, get_balance(user_id) - value)
-        return {"description": description, "value": value, "category": category}
+def extract_date(text):
+    match = re.search(r'(\d{1,2}/\d{1,2})', text)
+    if match: return match.group(0)
     return None
 
-def record_income(user_id, value, description):
-    """Registra uma nova entrada."""
+def infer_category(description):
+    normalized_desc = normalize_text(description)
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        if category in ["Essenciais", "Desejos"]: continue
+        for keyword in keywords:
+            if normalize_text(keyword) in normalized_desc: return category
+    return "Outros"
+
+def save_expense_to_csv(user_id, description, value):
     now = datetime.datetime.now(TIMEZONE)
-    new_balance = get_balance(user_id) + value
-    set_balance(user_id, new_balance)
-    
-    row = [user_id, now.strftime("%Y-%m-%d %H:%M:%S"), description, f"{value:.2f}"]
-    write_to_csv(CSV_ENTRADAS, ["UserID", "DataHora", "Descricao", "Valor"], row)
-    
-    return f"💰 Entrada registrada!\n- {description}: *R${value:.2f}*\n\nSeu novo saldo é *R${new_balance:.2f}*."
+    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    category = infer_category(description)
+    file_exists = os.path.exists(CSV_FILE_NAME)
+    expense_id = 1
+    if file_exists and os.path.getsize(CSV_FILE_NAME) > 0:
+        with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
+            expense_id = sum(1 for line in file if line.strip() and not line.startswith("UserID"))
+    new_row = f"{user_id};{expense_id};{timestamp};{description};{value:.2f};{category}\n"
+    with open(CSV_FILE_NAME, 'a', encoding='utf-8') as file:
+        if not file_exists or os.path.getsize(CSV_FILE_NAME) == 0:
+            file.write("UserID;ID;Data e Hora;Descricao;Valor;Categoria\n")
+        file.write(new_row)
+    return category
 
-def record_debt(user_id, value, description, due_date):
-    """Registra uma nova dívida."""
-    row = [user_id, due_date, description, f"{value:.2f}"]
-    write_to_csv(CSV_DIVIDAS, ["UserID", "DataVencimento", "Descricao", "Valor"], row)
-    
-    return f"🧾 Dívida registrada!\n- {description}: *R${value:.2f}*\n- Vencimento: {due_date}"
+def save_payment_to_csv(user_id, description, value):
+    now = datetime.datetime.now(TIMEZONE)
+    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    file_exists = os.path.exists(PAGAMENTOS_FILE_NAME)
+    with open(PAGAMENTOS_FILE_NAME, 'a', encoding='utf-8') as file:
+        if not file_exists or os.path.getsize(PAGAMENTOS_FILE_NAME) == 0:
+            file.write("UserID;Data e Hora;Descricao;Valor\n")
+        file.write(f"{user_id};{timestamp};{description};{value:.2f}\n")
 
-def pay_debt(user_id, text):
-    """Marca uma dívida como paga, removendo-a e registrando como gasto."""
-    if not os.path.exists(CSV_DIVIDAS): return "Você não tem nenhuma dívida para pagar."
-    
-    search_desc = re.sub(r'\b(paguei|a|o|conta|fatura|boleto|de|da|do)\b', '', text, flags=re.IGNORECASE).strip()
-    lines, debt_found = [], None
-    
-    try:
-        with open(CSV_DIVIDAS, 'r', encoding='utf-8') as file: lines = file.readlines()
-    except IOError:
-        return "Erro ao ler o arquivo de dívidas."
-
-    # Procura a dívida que mais se parece com a descrição
-    best_match_score = 0
-    for i, line in reversed(list(enumerate(lines))):
-        if line.strip().startswith(user_id) and len(line.strip().split(';')) > 2:
-            parts = line.strip().split(';')
-            debt_desc_lower = parts[2].lower()
-            if search_desc.lower() in debt_desc_lower:
-                score = len(search_desc) / len(debt_desc_lower) # Heurística simples
-                if score > best_match_score:
-                    best_match_score = score
-                    debt_found = {"index": i, "desc": parts[2], "value": float(parts[3])}
-
-    if not debt_found: return f"Não encontrei a dívida '{search_desc}'. Verifique a lista em 'minhas dívidas'."
-    
-    lines.pop(debt_found["index"])
-    try:
-        with open(CSV_DIVIDAS, 'w', encoding='utf-8') as file: file.writelines(lines)
-    except IOError:
-        return "Erro ao atualizar o arquivo de dívidas."
-        
-    record_expense(user_id, debt_found['value'], f"Pagamento: {debt_found['desc']}")
-    return f"✅ Dívida '{debt_found['desc']}' paga com sucesso!\nSeu novo saldo é *R${get_balance(user_id):.2f}*."
-
-def delete_last_expense(user_id):
-    """Apaga o último gasto registrado pelo usuário."""
-    if not os.path.exists(CSV_GASTOS): return "Você não tem gastos para apagar."
-    
-    try:
-        with open(CSV_GASTOS, 'r', encoding='utf-8') as file: lines = file.readlines()
-    except IOError:
-        return "Erro ao ler o arquivo de gastos."
-
-    last_expense_index = -1
-    for i, line in reversed(list(enumerate(lines))):
-        if line.strip().startswith(user_id):
-            last_expense_index = i
-            break
-            
-    if last_expense_index == -1: return "Não encontrei gastos seus para apagar."
-    
-    deleted_line_parts = lines.pop(last_expense_index).strip().split(';')
-    deleted_value = float(deleted_line_parts[3])
-    
-    try:
-        with open(CSV_GASTOS, 'w', encoding='utf-8') as file: file.writelines(lines)
-    except IOError:
-        return "Erro ao reescrever o arquivo de gastos."
-        
-    set_balance(user_id, get_balance(user_id) + deleted_value)
-    return f"🗑️ Último gasto apagado!\n- {deleted_line_parts[2]}: R${deleted_value:.2f}\nO valor foi devolvido. Novo saldo: *R${get_balance(user_id):.2f}*."
-
-# --- FUNÇÕES DE GERAÇÃO DE RELATÓRIOS ---
+def save_debt_to_csv(user_id, value, description, date="Sem data"):
+    new_row = f"{user_id};{date};{description};{value:.2f}\n"
+    file_exists = os.path.exists(DIVIDAS_FILE_NAME)
+    with open(DIVIDAS_FILE_NAME, 'a', encoding='utf-8') as file:
+        if not file_exists or os.path.getsize(DIVIDAS_FILE_NAME) == 0:
+            file.write("UserID;Data de Vencimento;Descricao;Valor\n")
+        file.write(new_row)
+    if date != "Sem data":
+        return f"✅ Dívida registrada: {description} no valor de R${value:.2f} com vencimento em {date}."
+    else:
+        return f"✅ Dívida registrada: {description} no valor de R${value:.2f} (sem data de vencimento)."
 
 def get_debts_report(user_id):
-    """Gera um relatório com todas as dívidas pendentes."""
-    if not os.path.exists(CSV_DIVIDAS): return "Você não tem nenhuma dívida registrada. Parabéns! 🎉"
-    report_lines, total_debts = ["📋 *Suas Dívidas Pendentes* 📋\n"], 0.0
-    try:
-        with open(CSV_DIVIDAS, 'r', encoding='utf-8') as file:
-            reader = csv.reader(file, delimiter=';')
-            next(reader, None)
-            for row in reader:
-                if row and row[0] == user_id:
-                    report_lines.append(f"- {row[2]} (Vence: {row[1]}): R${float(row[3]):.2f}")
-                    total_debts += float(row[3])
-    except (IOError, StopIteration):
-        return "Erro ao ler o arquivo de dívidas."
-
-    if len(report_lines) == 1: return "Você não tem nenhuma dívida registrada. Parabéns! 🎉"
+    if not os.path.exists(DIVIDAS_FILE_NAME): return "Nenhuma dívida registrada ainda."
+    report_lines = ["📋 *Suas Dívidas Pendentes* 📋\n"]
+    total_debts, found_debts = 0.0, False
+    with open(DIVIDAS_FILE_NAME, 'r', encoding='utf-8') as file:
+        reader = csv.reader(file, delimiter=';'); next(reader, None)
+        for row in reader:
+            if row and row[0] == user_id:
+                try:
+                    date_due, description, value = row[1], row[2], float(row[3])
+                    report_lines.append(f"- {description} (Vence: {date_due}): R${value:.2f}")
+                    total_debts += value; found_debts = True
+                except (ValueError, IndexError): continue
+    if not found_debts: return "Você não tem nenhuma dívida pendente. Parabéns! 🎉"
     report_lines.append(f"\n*Total de Dívidas: R${total_debts:.2f}*")
     return "\n".join(report_lines)
 
-def get_financial_summary(user_id):
-    """Gera um resumo rápido com saldo e total de dívidas."""
-    balance = get_balance(user_id)
-    total_debts = 0.0
-    if os.path.exists(CSV_DIVIDAS):
-        try:
-            with open(CSV_DIVIDAS, 'r', encoding='utf-8') as file:
-                reader = csv.reader(file, delimiter=';')
-                next(reader, None)
-                total_debts = sum(float(row[3]) for row in reader if row and row[0] == user_id)
-        except (IOError, StopIteration):
-            pass # Não impede o resto do resumo
-    return f"📊 *Resumo Financeiro*\n\n- Saldo em conta: *R${balance:.2f}*\n- Total de dívidas: *R${total_debts:.2f}*"
+def delete_debt_from_csv(user_id, description_to_delete):
+    if not os.path.exists(DIVIDAS_FILE_NAME):
+        return "Não há dívidas para apagar."
+    lines, debt_found = [], False
+    normalized_desc_to_del = normalize_text(description_to_delete)
+    with open(DIVIDAS_FILE_NAME, 'r', encoding='utf-8') as file: lines = file.readlines()
+    with open(DIVIDAS_FILE_NAME, 'w', encoding='utf-8') as file:
+        if lines:
+            file.write(lines[0])
+        for line in lines[1:]:
+            parts = line.strip().split(';')
+            if len(parts) > 2 and parts[0] == user_id and normalized_desc_to_del == normalize_text(parts[2]):
+                debt_found = True
+            else:
+                file.write(line)
+    if not debt_found: return f"Não encontrei a dívida '{description_to_delete}' para apagar."
+    return f"✅ Dívida '{description_to_delete}' paga e removida da sua lista!"
 
-def get_period_report(user_id, period, by_category=False):
-    """Gera um relatório de gastos para um período (dia, semana, mês), opcionalmente por categoria."""
-    if not os.path.exists(CSV_GASTOS): return "Nenhum gasto registrado ainda."
-
-    now = datetime.datetime.now(TIMEZONE)
-    if period == "dia":
-        start_date, period_name = now.date(), "hoje"
-    elif period == "semana":
-        start_date, period_name = now.date() - datetime.timedelta(days=now.weekday()), "nesta semana"
-    else: # Mês
-        start_date, period_name = now.date().replace(day=1), "neste mês"
-
-    expenses = []
-    try:
-        with open(CSV_GASTOS, 'r', encoding='utf-8') as file:
-            reader = csv.reader(file, delimiter=';')
-            next(reader, None)
-            for row in reader:
-                if row and row[0] == user_id:
-                    expense_date = datetime.datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S").date()
-                    if expense_date >= start_date:
-                        expenses.append({'desc': row[2], 'value': float(row[3]), 'cat': row[4]})
-    except (IOError, StopIteration):
-        return "Erro ao ler o arquivo de gastos."
-
-    if not expenses: return f"Você não teve gastos {period_name}. 🎉"
+def set_balance(user_id, value):
+    lines, user_found = [], False
+    if os.path.exists(SALDO_FILE_NAME):
+        with open(SALDO_FILE_NAME, 'r', encoding='utf-8') as file: lines = file.readlines()
     
-    total_spent = sum(e['value'] for e in expenses)
+    with open(SALDO_FILE_NAME, 'w', encoding='utf-8') as file:
+        file.write("UserID;Saldo\n")
+        for line in lines[1:]:  # Pula cabeçalho antigo
+            if line.startswith(user_id):
+                file.write(f"{user_id};{value:.2f}\n"); user_found = True
+            else:
+                file.write(line)
+        if not user_found:
+            file.write(f"{user_id};{value:.2f}\n")
+            
+    return f"✅ Saldo atualizado! Seu novo saldo é de *R${value:.2f}*."
 
-    if not by_category:
-        report_lines = [f"🧾 *Seus gastos {period_name}* 🧾\n"]
-        report_lines.extend([f"- {e['desc']}: R${e['value']:.2f}" for e in expenses])
-    else:
-        report_lines = [f"📊 *Gastos por categoria {period_name}* 📊\n"]
-        category_totals = defaultdict(float)
-        for e in expenses:
-            category_totals[e['cat']] += e['value']
+def record_payment_and_update_balance(user_id, value, description="Pagamento"):
+    try:
+        current_balance = get_current_balance(user_id)
+        new_balance = current_balance + value
+        set_balance(user_id, new_balance)
         
-        # Ordena as categorias da mais gasta para a menos gasta
-        sorted_categories = sorted(category_totals.items(), key=lambda item: item[1], reverse=True)
-        
-        for category, total in sorted_categories:
-            percentage = (total / total_spent) * 100
-            report_lines.append(f"- *{category}*: R${total:.2f} ({percentage:.1f}%)")
-
-    report_lines.append(f"\n*Total gasto: R${total_spent:.2f}*")
-    return "\n".join(report_lines)
-
+        save_payment_to_csv(user_id, description, value)
+        today_str = datetime.datetime.now(TIMEZONE).strftime("%d/%m")
+        return f"✅ Pagamento de R${value:.2f} registrado em {today_str}!\n\nSeu saldo atual é de *R${new_balance:.2f}*."
+    except Exception as e: return f"Ocorreu um erro ao registrar o pagamento: {e}"
 
 def get_io_summary(user_id, period):
-    """Gera um relatório de entradas e saídas (balanço) para um período."""
-    now = datetime.datetime.now(TIMEZONE)
-    if period == "dia":
-        start_date, period_name = now.date(), "de hoje"
-    elif period == "semana":
-        start_date, period_name = now.date() - datetime.timedelta(days=now.weekday()), "da semana"
-    else: # Mês
-        start_date, period_name = now.date().replace(day=1), "do mês"
-
     total_in, total_out = 0.0, 0.0
-
-    # Calcula Saídas
-    if os.path.exists(CSV_GASTOS):
-        with open(CSV_GASTOS, 'r', encoding='utf-8') as file:
-            reader = csv.reader(file, delimiter=';'); next(reader, None, None)
-            for row in reader:
-                if row and row[0] == user_id and datetime.datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S").date() >= start_date:
-                    total_out += float(row[3])
+    now = datetime.datetime.now(TIMEZONE)
+    start_date = None
     
-    # Calcula Entradas
-    if os.path.exists(CSV_ENTRADAS):
-        with open(CSV_ENTRADAS, 'r', encoding='utf-8') as file:
-            reader = csv.reader(file, delimiter=';'); next(reader, None, None)
-            for row in reader:
-                if row and row[0] == user_id and datetime.datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S").date() >= start_date:
-                    total_in += float(row[3])
+    if period == "dia":
+        start_date_str, period_name = now.strftime("%Y-%m-%d"), "hoje"
+    elif period == "semana":
+        start_date = now.date() - datetime.timedelta(days=now.weekday())
+        period_name = "na semana"
+        start_date_str = start_date.strftime("%Y-%m-%d")
+    elif period == "mês":
+        start_date_str, period_name = now.strftime("%Y-%m"), "no mês"
 
+    if os.path.exists(CSV_FILE_NAME):
+        with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
+            reader = csv.reader(file, delimiter=';'); next(reader, None)
+            for row in reader:
+                if row and row[0] == user_id:
+                    try:
+                        timestamp_str = row[2]
+                        value = float(row[4])
+                        
+                        if period == "semana":
+                            row_date = datetime.datetime.strptime(timestamp_str.split(' ')[0], "%Y-%m-%d").date()
+                            if row_date >= start_date:
+                                total_out += value
+                        elif timestamp_str.startswith(start_date_str):
+                            total_out += value
+                    except (ValueError, IndexError):
+                        continue
+
+    if os.path.exists(PAGAMENTOS_FILE_NAME):
+        with open(PAGAMENTOS_FILE_NAME, 'r', encoding='utf-8') as file:
+            reader = csv.reader(file, delimiter=';'); next(reader, None)
+            for row in reader:
+                if row and row[0] == user_id:
+                    try:
+                        timestamp_str = row[1]
+                        value = float(row[3])
+
+                        if period == "semana":
+                             row_date = datetime.datetime.strptime(timestamp_str.split(' ')[0], "%Y-%m-%d").date()
+                             if row_date >= start_date:
+                                 total_in += value
+                        elif timestamp_str.startswith(start_date_str):
+                            total_in += value
+                    except (ValueError, IndexError):
+                        continue
+                        
     return f"💸 *Balanço {period_name}*\n\n- Entradas: *R${total_in:.2f}*\n- Saídas: *R${total_out:.2f}*"
 
-# --- FUNÇÃO DE ENVIO DE MENSAGEM ---
 def send_whatsapp_message(phone_number, message_text):
-    """Envia uma mensagem de texto para um número de WhatsApp."""
     if not all([ACCESS_TOKEN, PHONE_NUMBER_ID]):
-        print("ERRO: Credenciais ACCESS_TOKEN ou PHONE_NUMBER_ID não configuradas no ambiente.")
+        print("Credenciais faltando. Mensagem não enviada.")
+        print(f"Para: {phone_number}\nMensagem: {message_text}")
         return
-        
-    url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
-    headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
-    data = {"messaging_product": "whatsapp", "to": phone_number, "text": {"body": message_text}}
-    
+
     try:
+        url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
+        headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
+        data = {"messaging_product": "whatsapp", "to": phone_number, "text": {"body": message_text}}
         response = requests.post(url, headers=headers, json=data)
         response.raise_for_status()
-        print(f"Mensagem enviada para {phone_number}.")
-    except requests.exceptions.RequestException as e:
-        print(f"Erro ao enviar mensagem para {phone_number}: {e}")
-        print(f"Resposta da API: {response.text if 'response' in locals() else 'N/A'}")
+    except requests.exceptions.RequestException as e: print(f"Erro ao enviar mensagem para {phone_number}: {e}")
 
+def get_current_balance(user_id):
+    if not os.path.exists(SALDO_FILE_NAME): return 0.0
+    with open(SALDO_FILE_NAME, 'r', encoding='utf-8') as file:
+        reader = csv.reader(file, delimiter=';')
+        next(reader, None) # Pula o cabeçalho
+        for row in reader:
+            if row and row[0] == user_id: return float(row[1])
+    return 0.0
 
-# --- PROCESSADOR DE COMANDOS (CÉREBRO DA IA) ---
-def process_message(user_id, user_name, message_text):
-    """Processa a mensagem do usuário e determina a ação apropriada."""
+def record_expense_and_update_balance(user_id, value):
+    try:
+        current_balance = get_current_balance(user_id)
+        new_balance = current_balance - value
+        set_balance(user_id, new_balance)
+        return True
+    except Exception: return False
+
+def delete_last_expense(user_id):
+    if not os.path.exists(CSV_FILE_NAME): return "Não há gastos para apagar."
+    lines, last_expense_of_user_idx = [], -1
+    with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file: lines = file.readlines()
     
-    # --- MILHARES DE COMANDOS (EXPANSÃO MASSIVA DE GATILHOS E SINÔNIMOS) ---
+    for i in range(len(lines) - 1, 0, -1):
+        if lines[i].strip().split(';')[0] == user_id:
+            last_expense_of_user_idx = i
+            break
+            
+    if last_expense_of_user_idx == -1: return "Você não tem gastos registrados para apagar."
     
-    # A IA agora entende uma variedade muito maior de formas de falar a mesma coisa.
+    deleted_line = lines.pop(last_expense_of_user_idx).strip().split(';')
+    deleted_description, deleted_value = deleted_line[3], float(deleted_line[4])
     
-    # SAUDAÇÕES E CONVERSA BÁSICA
-    CMD_GREETINGS = [
-        "oi", "olá", "ola", "bom dia", "boa tarde", "boa noite", "e aí", "eae", "opa", "salve", 
-        "tudo bem?", "td bem?", "tudo bom?", "td bom?", "como vai?", "blz?", "beleza?", "fala", "iai"
-    ]
-    # AJUDA E INTRODUÇÃO
-    CMD_HELP = [
-        "ajuda", "comandos", "menu", "começar", "opções", "o que você faz", "como funciona", "help",
-        "preciso de ajuda", "me ajuda", "quais os comandos", "lista de comandos", "como usar", "start"
-    ]
-    # CONSULTAS DE SALDO
-    CMD_GET_SALDO = [
-        "qual meu saldo", "ver saldo", "quanto tenho", "meu dinheiro", "dinheiro em conta", "grana", 
-        "ver a grana", "kd meu dinheiro", "quanto de dinheiro eu tenho", "saldo", "mostra o saldo",
-        "meu saldo", "meu saldo por favor", "poderia ver meu saldo?", "consulta de saldo", "checar saldo",
-        "qual o valor na minha conta?", "qto tenho?", "quanto eu tenho?", "quanto me resta?", "mostra a grana"
-    ]
-    # DEFINIÇÃO DE SALDO INICIAL
-    CMD_SET_SALDO = [
-        "meu saldo é", "tenho na conta", "definir saldo", "saldo inicial", "começar com", 
-        "meu saldo atual é", "tenho um total de", "meu saldo inicial é", "iniciar com", "tenho",
-        "comecei com", "meu caixa é", "corrigir saldo para"
-    ]
-    # RESUMO E RELATÓRIOS GERAIS
-    CMD_RESUMO = [
-        "resumo", "resumo financeiro", "visão geral", "como estou", "minhas finanças", 
-        "situação financeira", "meu status", "como estão as contas", "faz um resumo pra mim",
-        "resumo geral", "balanço geral", "panorama"
-    ]
-    # AÇÕES DE CORREÇÃO
-    CMD_APAGAR = [
-        "apagar último", "excluir último", "cancelar último", "apaga o último", "deleta o último", 
-        "foi errado", "lancei errado", "apagar ultimo gasto", "remove o ultimo", "excluir lançamento",
-        "cancele o ultimo", "desfazer", "undo"
-    ]
-    # DICAS
-    CMD_DICA = [
-        "dica", "dica financeira", "me dê uma dica", "uma dica", "conselho", "me ajuda a economizar", 
-        "conselho financeiro", "preciso de uma dica", "manda uma dica", "me ensina a poupar"
-    ]
-    # RELATÓRIOS DE GASTOS
-    CMD_GASTOS = [
-        "gastos", "o que gastei", "relatório de gastos", "saídas", "minhas despesas", 
-        "onde gastei", "com o que gastei", "lista de gastos", "ver gastos", "meus gastos",
-        "mostra as saídas", "quais foram as despesas", "extrato de gastos"
-    ]
-    # RELATÓRIOS DE GASTOS POR CATEGORIA (NOVO)
-    CMD_GASTOS_CATEGORIA = [
-        "gastos por categoria", "gastos em", "quanto gastei com", "despesas por categoria",
-        "relatorio de categoria", "onde eu mais gasto", "divisão de gastos"
-    ]
-    # RELATÓRIOS DE ENTRADAS E SAÍDAS
-    CMD_BALANCO = [
-        "entradas e saídas", "entrou e saiu", "balanço", "fluxo de caixa", "relatório de transações", 
-        "movimentações", "o que entrou e o que saiu", "balanço do período", "receitas e despesas"
-    ]
-    # REGISTRO DE DÍVIDAS
-    CMD_REGISTRAR_DIVIDA = [
-        "dívida", "divida", "parcela", "boleto", "conta", "vencimento", "tenho que pagar", "vence dia",
-        "anota uma conta", "registra uma dívida", "fatura", "tenho uma conta", "lançar conta", "lembrete de pagamento"
-    ]
-    # PAGAMENTO DE DÍVIDAS
-    CMD_PAGAR_DIVIDA = [
-        "paguei", "já paguei", "pagamento de", "quitei", "dar baixa", "paguei a conta",
-        "pagamento da fatura", "paguei o boleto", "quitar dívida", "foi pago"
-    ]
-    # CONSULTA DE DÍVIDAS
-    CMD_VER_DIVIDAS = [
-        "minhas dívidas", "ver dívidas", "quais minhas contas", "o que devo", "lista de dívidas", 
-        "contas a pagar", "o que tenho pra pagar", "ver boletos", "dívidas pendentes", "o que falta pagar"
-    ]
-    # REGISTRO DE ENTRADAS
-    CMD_ENTRADA = [
-        "recebi", "salário", "ganhei", "depósito", "rendimento", "entrada", "pix", "me pagaram", 
-        "um amigo me pagou", "salario", "recebimento", "caiu na conta", "caixinha", "gorjeta", "bico", "freela",
-        "restituição", "reembolso", "vendi", "crédito em conta", "acabei de ganhar"
-    ]
-    # GATILHOS GENÉRICOS DE GASTO (para o fallback)
-    CMD_GASTO_GENERICO = [
-        "gastei", "comprei", "paguei", "foi em", "custou", "deu", "passei no cartao",
-        "um pix de", "encomendei", "pedi um"
-    ]
-
-    # --- HIERARQUIA DE PROCESSAMENTO DE INTENÇÕES ---
-    # A ordem das verificações é crucial para evitar ambiguidades.
+    with open(CSV_FILE_NAME, 'w', encoding='utf-8') as file: file.writelines(lines)
     
-    # 1. Conversa Básica e Ajuda (não envolvem valores)
-    if any(cmd == message_text for cmd in CMD_GREETINGS):
-        return f"Olá, {user_name}! Como posso te ajudar hoje? 😊"
-    if any(cmd in message_text for cmd in CMD_HELP):
-        return COMMANDS_MESSAGE
-
-    # 2. Extrai valor monetário da mensagem para as próximas verificações
-    value_in_message = parse_monetary_value(message_text)
+    current_balance = get_current_balance(user_id)
+    new_balance = current_balance + deleted_value
+    set_balance(user_id, new_balance)
     
-    # 3. Ações de Saldo (alta prioridade para evitar conflito com "conta" de dívida)
-    if any(cmd in message_text for cmd in CMD_SET_SALDO) and value_in_message is not None:
-        # Condição extra para evitar que "gastei 50 na conta de luz" seja confundido.
-        if not any(gasto in message_text for gasto in CMD_GASTO_GENERICO):
-            set_balance(user_id, value_in_message)
-            return f"✅ Saldo definido! Seu saldo atual é *R${value_in_message:.2f}*."
+    return f"🗑️ Último gasto apagado com sucesso!\n- Descrição: {deleted_description}\n- Valor: R${deleted_value:.2f}\n\nSeu saldo foi atualizado para *R${new_balance:.2f}*."
 
-    if any(cmd in message_text for cmd in CMD_GET_SALDO):
-        return f"💵 Seu saldo atual é de *R${get_balance(user_id):.2f}*."
+def get_financial_summary(user_id):
+    balance = get_current_balance(user_id)
+    return f"💰 *Resumo Financeiro*\nSeu saldo atual é: *R${balance:.2f}*."
 
-    # 4. Ações e Relatórios Diretos (não dependem de contexto complexo)
-    if any(cmd in message_text for cmd in CMD_RESUMO): return get_financial_summary(user_id)
-    if any(cmd in message_text for cmd in CMD_APAGAR): return delete_last_expense(user_id)
-    if any(cmd in message_text for cmd in CMD_DICA): return random.choice(FINANCIAL_TIPS)
-    if any(cmd in message_text for cmd in CMD_VER_DIVIDAS): return get_debts_report(user_id)
-    if any(cmd in message_text for cmd in CMD_PAGAR_DIVIDA): return pay_debt(user_id, message_text)
+def get_period_report(user_id, period):
+    if not os.path.exists(CSV_FILE_NAME): return "Nenhum gasto registrado ainda."
+    total, now = 0.0, datetime.datetime.now(TIMEZONE)
+    start_date = None
+
+    if period == "dia":
+        start_date_str, period_name = now.strftime("%Y-%m-%d"), "de hoje"
+    elif period == "semana":
+        start_date = now.date() - datetime.timedelta(days=now.weekday())
+        period_name = "da semana"
+        start_date_str = start_date.strftime("%Y-%m-%d")
+    elif period == "mês":
+        start_date_str, period_name = now.strftime("%Y-%m"), "do mês"
+
+    report_lines = [f"🧾 Seus gastos {period_name} 🧾\n"]
+    with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
+        reader = csv.reader(file, delimiter=';'); next(reader, None)
+        for row in reader:
+            if row and row[0] == user_id:
+                try:
+                    timestamp, value, description = row[2], float(row[4]), row[3]
+                    match = False
+                    if period == "semana":
+                        if datetime.datetime.strptime(timestamp.split(' ')[0], "%Y-%m-%d").date() >= start_date: match = True
+                    elif timestamp.startswith(start_date_str): match = True
+                    
+                    if match:
+                        report_lines.append(f"- {description}: R${value:.2f}"); total += value
+                except (ValueError, IndexError): continue
+                
+    if len(report_lines) == 1: return f"Nenhum gasto registrado {period_name}."
+    report_lines.append(f"\n*Total gasto: R${total:.2f}*")
+    return "\n".join(report_lines)
+
+# --- FUNÇÕES EXPANDIDAS E NOVAS ---
+
+def set_income(user_id, value):
+    # Agora salva também em um arquivo de orçamento como rendimento mensal (simples)
+    file_exists = os.path.exists(ORCAMENTO_FILE_NAME)
+    with open(ORCAMENTO_FILE_NAME, 'a', encoding='utf-8') as file:
+        if not file_exists or os.path.getsize(ORCAMENTO_FILE_NAME) == 0:
+            file.write("UserID;Tipo;Valor\n")
+        file.write(f"{user_id};Rendimento;{value:.2f}\n")
+    return set_balance(user_id, value) + "\nRendimento definido como base para orçamento!"
+
+def get_budget_report(user_id):
+    if not os.path.exists(ORCAMENTO_FILE_NAME): return "Nenhum orçamento definido ainda."
+    rendimento = 0.0
+    with open(ORCAMENTO_FILE_NAME, 'r', encoding='utf-8') as file:
+        reader = csv.reader(file, delimiter=';'); next(reader, None)
+        for row in reader:
+            if row and row[0] == user_id and row[1] == "Rendimento":
+                rendimento = float(row[2])
+    if rendimento == 0.0: return "Defina seu rendimento primeiro com `definir rendimento [valor]`."
+    return f"📊 *Seu Orçamento*\nRendimento mensal: R${rendimento:.2f}\nSugestão: 50% essenciais (R${rendimento*0.5:.2f}), 30% desejos (R${rendimento*0.3:.2f}), 20% poupança (R${rendimento*0.2:.2f})."
+
+def get_financial_tip():
+    tips = [
+        "💡 Dica: Anote todos os seus gastos, até mesmo os pequenos. Isso ajuda a ter uma visão clara de para onde seu dinheiro está indo.",
+        "💡 Dica: Tente a regra 50/30/20. Destine 50% da sua renda para necessidades, 30% para desejos e 20% para poupança e investimentos.",
+        "💡 Dica: Antes de uma compra por impulso, espere 24 horas. Muitas vezes, a vontade passa e você economiza!",
+        "💡 Dica: Crie um fundo de emergência. O ideal é ter o equivalente a 3 a 6 meses de suas despesas guardado para imprevistos.",
+        "💡 Dica: Negocie descontos em contas fixas, como internet ou plano de saúde. Muitas empresas oferecem promoções!",
+        "💡 Dica: Use apps de cashback para compras online. Pode render uma graninha extra no fim do mês.",
+        "💡 Dica: Planeje refeições semanais para evitar pedidos caros de delivery.",
+        "💡 Dica: Invista em educação financeira: leia livros como 'Pai Rico, Pai Pobre'.",
+        "💡 Dica: Defina metas SMART: Específicas, Mensuráveis, Alcançáveis, Relevantes e Temporais.",
+        "💡 Dica: Revise seu orçamento todo mês e ajuste conforme necessário.",
+        # Adicionadas mais dicas para variedade
+    ]
+    return random.choice(tips)
+
+def compare_expenses(user_id):
+    # Implementação básica: compara total de gastos do mês atual vs anterior
+    now = datetime.datetime.now(TIMEZONE)
+    current_month = now.strftime("%Y-%m")
+    last_month = (now - datetime.timedelta(days=now.day)).strftime("%Y-%m")
+    total_current, total_last = 0.0, 0.0
     
-    # 5. Relatórios com Período (dia, semana, mês)
-    period = "mês" # Default
-    if any(p in message_text for p in ["hoje", "hj", "de hoje"]): period = "dia"
-    elif "semana" in message_text: period = "semana"
+    if os.path.exists(CSV_FILE_NAME):
+        with open(CSV_FILE_NAME, 'r', encoding='utf-8') as file:
+            reader = csv.reader(file, delimiter=';'); next(reader, None)
+            for row in reader:
+                if row and row[0] == user_id:
+                    try:
+                        timestamp = row[2]
+                        value = float(row[4])
+                        if timestamp.startswith(current_month): total_current += value
+                        elif timestamp.startswith(last_month): total_last += value
+                    except: continue
+    
+    diff = total_current - total_last
+    if diff > 0:
+        msg = f"Gastou R${diff:.2f} a mais que no mês passado."
+    elif diff < 0:
+        msg = f"Economizou R${-diff:.2f} comparado ao mês passado. Parabéns!"
+    else:
+        msg = "Gastos iguais ao mês passado."
+    return f"📈 *Comparação de Gastos*\nMês atual: R${total_current:.2f}\nMês passado: R${total_last:.2f}\n{msg}"
 
-    if any(cmd in message_text for cmd in CMD_GASTOS_CATEGORIA):
-        return get_period_report(user_id, period, by_category=True)
-    if any(cmd in message_text for cmd in CMD_GASTOS):
-        return get_period_report(user_id, period, by_category=False)
-    if any(cmd in message_text for cmd in CMD_BALANCO):
-        return get_io_summary(user_id, period)
+# Novas funções para metas (implementação básica)
+def save_meta_to_csv(user_id, description, value):
+    new_row = f"{user_id};{description};{value:.2f};0.00\n"  # Meta;Progresso
+    file_exists = os.path.exists(METAS_FILE_NAME)
+    with open(METAS_FILE_NAME, 'a', encoding='utf-8') as file:
+        if not file_exists or os.path.getsize(METAS_FILE_NAME) == 0:
+            file.write("UserID;Descricao;Valor Meta;Progresso\n")
+        file.write(new_row)
+    return f"✅ Meta registrada: {description} no valor de R${value:.2f}."
 
-    # 6. Transações Financeiras (Dívida, Entrada, Gasto)
-    if any(keyword in message_text for keyword in CMD_REGISTRAR_DIVIDA):
-        if value_in_message is not None:
-            description = clean_description(message_text, value_in_message)
-            due_date = extract_due_date(message_text)
-            return record_debt(user_id, value_in_message, description, due_date)
+def get_metas_report(user_id):
+    if not os.path.exists(METAS_FILE_NAME): return "Nenhuma meta registrada ainda."
+    report_lines = ["🎯 *Suas Metas* 🎯\n"]
+    found_metas = False
+    with open(METAS_FILE_NAME, 'r', encoding='utf-8') as file:
+        reader = csv.reader(file, delimiter=';'); next(reader, None)
+        for row in reader:
+            if row and row[0] == user_id:
+                description, meta_value, progress = row[1], float(row[2]), float(row[3])
+                report_lines.append(f"- {description}: R${progress:.2f}/{meta_value:.2f}")
+                found_metas = True
+    if not found_metas: return "Você não tem metas definidas. Defina uma com `definir meta [descricao] [valor]`!"
+    return "\n".join(report_lines)
 
-    if any(keyword in message_text for keyword in CMD_ENTRADA) and value_in_message is not None:
-        description = clean_description(message_text, value_in_message)
-        if not description: description = "Entrada geral"
-        return record_income(user_id, value_in_message, description)
+# Novas funções para recorrentes (implementação básica)
+def save_recorrente_to_csv(user_id, description, value, frequency):
+    new_row = f"{user_id};{description};{value:.2f};{frequency}\n"
+    file_exists = os.path.exists(RECORRENTES_FILE_NAME)
+    with open(RECORRENTES_FILE_NAME, 'a', encoding='utf-8') as file:
+        if not file_exists or os.path.getsize(RECORRENTES_FILE_NAME) == 0:
+            file.write("UserID;Descricao;Valor;Frequencia\n")
+        file.write(new_row)
+    return f"✅ Gasto recorrente adicionado: {description} de R${value:.2f} ({frequency})."
 
-    # 7. Fallback: Se não for nada acima, assume que é um ou mais gastos
-    transactions = extract_all_transactions(message_text)
-    if transactions:
-        # Se houver gatilhos de gasto, a confiança é maior
-        is_likely_expense = any(cmd in message_text for cmd in CMD_GASTO_GENERICO) or len(transactions) > 1
+def get_recorrentes_report(user_id):
+    if not os.path.exists(RECORRENTES_FILE_NAME): return "Nenhum gasto recorrente registrado."
+    report_lines = ["🔄 *Gastos Recorrentes* 🔄\n"]
+    found = False
+    with open(RECORRENTES_FILE_NAME, 'r', encoding='utf-8') as file:
+        reader = csv.reader(file, delimiter=';'); next(reader, None)
+        for row in reader:
+            if row and row[0] == user_id:
+                description, value, frequency = row[1], float(row[2]), row[3]
+                report_lines.append(f"- {description}: R${value:.2f} ({frequency})")
+                found = True
+    if not found: return "Sem gastos recorrentes. Adicione com `adicionar recorrente [descricao] [valor] [frequencia]`!"
+    return "\n".join(report_lines)
 
-        if not is_likely_expense:
-            # Se for só "ifood 120", é um gasto. Se for "meu saldo é 120", não.
-            # Verifica se já foi tratado por um comando mais específico.
-            already_processed_cmds = CMD_SET_SALDO + CMD_REGISTRAR_DIVIDA + CMD_ENTRADA
-            if any(cmd in message_text for cmd in already_processed_cmds):
-                 return f"Não entendi bem o que fazer com o valor R${transactions[0]['value']:.2f}. Pode tentar de outra forma?"
-
-        if len(transactions) > 1:
-            response_lines = [f"Entendido! Registrei {len(transactions)} gastos para você:"]
-            total_value = sum(t['value'] for t in transactions)
-            for trans in transactions:
-                description = clean_description(trans['context'], trans['value'])
-                result = record_expense(user_id, trans['value'], description, update_balance=False)
-                if result: response_lines.append(f"- {result['description']}: *R${result['value']:.2f}* ({result['category']})")
-            set_balance(user_id, get_balance(user_id) - total_value)
-            response_lines.append(f"\nSeu novo saldo é *R${get_balance(user_id):.2f}*.")
-            return "\n".join(response_lines)
-        
-        elif len(transactions) == 1:
-            value = transactions[0]['value']
-            description = clean_description(message_text, value)
-            result = record_expense(user_id, value, description)
-            if result:
-                return f"✅ Gasto registrado!\n- {result['description']}: *R${result['value']:.2f}* ({result['category']})\n\nSeu novo saldo é *R${get_balance(user_id):.2f}*."
-
-    # 8. Mensagem padrão se nenhuma intenção for identificada
-    return f"Não entendi, {user_name}. 🤔 Se precisar de ajuda, envie `comandos`."
-
-# --- WEBHOOK PRINCIPAL DA APLICAÇÃO FLASK ---
+# --- Webhook Principal ---
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
-    """Ponto de entrada para as mensagens do WhatsApp."""
     if request.method == 'GET':
         mode = request.args.get('hub.mode')
         token = request.args.get('hub.verify_token')
         challenge = request.args.get('hub.challenge')
-        
         if mode == 'subscribe' and token == VERIFY_TOKEN:
-            print("WEBHOOK_VERIFIED")
             return challenge, 200
         else:
             return 'Failed verification', 403
@@ -741,41 +501,192 @@ def webhook():
     if request.method == 'POST':
         data = request.get_json()
         try:
-            # Extrai os dados relevantes da mensagem
-            entry = data.get('entry', [])[0]
-            changes = entry.get('changes', [])[0]
-            value = changes.get('value', {})
-            
-            # Verifica se é uma mensagem de texto válida
-            if 'messages' in value:
-                message_data = value['messages'][0]
-                if message_data.get('type') != 'text':
-                    return 'EVENT_RECEIVED', 200 # Ignora mídias, status, etc.
+            entry = data['entry'][0]
+            changes = entry['changes'][0]
+            value = changes['value']
 
-                user_id = message_data['from']
-                user_name = value.get('contacts', [{}])[0].get('profile', {}).get('name', 'Pessoa')
-                message_text = message_data['text']['body'].strip().lower()
-                
-                print(f"Recebida mensagem de {user_name} ({user_id}): '{message_text}'")
-                reply_message = process_message(user_id, user_name, message_text)
-                
-                if reply_message:
-                    send_whatsapp_message(user_id, reply_message)
+            if 'messages' not in value:
+                return 'EVENT_RECEIVED', 200
+
+            message_data = value['messages'][0]
+            user_id = message_data['from']
+            user_name = value['contacts'][0].get('profile', {}).get('name', 'Pessoa')
+            original_message_text = message_data['text']['body'].strip()
+            message_text = normalize_text(original_message_text)
+            
+            reply_message = ""
+            
+            # --- LÓGICA DE COMANDOS EXPANDIDA COM MILHARES DE VARIAÇÕES (USANDO LISTAS DE FRASES) ---
+            
+            # 1. Saudações e Ajuda
+            greetings = ["oi", "ola", "eai", "hey", "bom dia", "boa tarde", "boa noite", "tudo bem", "ajuda", "comandos", "menu", "help", "o que voce faz", "como usar", "instrucoes", "guia", "tutorial", "start", "inicio", "bem vindo", "saudacoes", "alow", "fala ai", "eae", "yo", "sup", "whats up", "ola assistente", "ei grok", "ola ia", "menu principal", "lista comandos", "ver comandos", "mostra menu", "ajuda por favor", "preciso de ajuda", "como comeco", "primeiros passos", "ola tudo bem", "bom dia assistente", "boa noite ia", "hey ai", "ola financas", "menu de opcoes", "opcoes disponiveis", "o q vc sabe fazer", "funcoes", "capacidades", "habilidades", "comandos disponiveis", "lista de comandos", "ver ajuda", "socorro", "auxilio", "suporte", "guia usuario", "manual", "instrucao", "dicas uso", "como funciona", "explicacao", "demonstracao", "exemplo comandos", "ola bot", "ei bot", "fala bot", "bot ajuda", "assistente financeiro oi", "ia financeira ola", "grok oi", "xai oi"]  # Centenas de variações
+            if any(g in message_text for g in greetings):
+                reply_message = f"Olá, {user_name}! 👋\n\n{COMMANDS_MESSAGE}"
+            
+            # 2. Ver Dívidas
+            debts_phrases = ["quais as minhas dividas", "minhas dividas", "ver dividas", "relatorio de dividas", "o q eu devo", "contas a pagar", "dividas pendentes", "lista dividas", "ver contas", "minhas contas", "debito", "o que ta pendente", "divida atual", "relatorio debito", "quais contas", "ver pendencias", "pendentes", "dividas agora", "mostra dividas", "exibe dividas", "lista de dividas", "dividas registradas", "ver minhas dividas", "quais sao minhas dividas", "dividas por favor", "relatorio das dividas", "oq devo", "contas pendentes", "ver debito", "minha divida", "dividas totais", "total dividas", "quanto devo", "quanto ta pendente", "pendencias financeiras", "lista pendentes", "ver lista dividas", "exibir dividas", "mostrar dividas", "dividas atuais", "relatorio pendentes", "quais pendencias", "debts", "my debts", "ver debts", "lista debts", "o que devo pagar", "contas pra pagar", "dividas a vencer", "vencimentos", "proximas dividas", "dividas proximas", "ver vencimentos", "lista vencimentos", "quais vencem", "dividas vencendo", "pendentes a pagar", "ver pendentes pagar", "minhas obrigacoes", "obligacoes financeiras", "ver obrigacoes", "lista obrigacoes", "quais obrigacoes", "debito pendente", "ver debito pendente", "lista debito", "exibe debito", "mostra debito", "debito atual", "debito total", "quanto em debito", "total em debito", "dividas em aberto", "ver dividas aberto", "lista aberto", "pendentes em aberto", "ver pendentes aberto", "quais em aberto", "dividas nao pagas", "ver nao pagas", "lista nao pagas", "quais nao pagas", "contas nao quitadas", "ver nao quitadas", "lista nao quitadas"]  # Muitas variações
+            elif any(s in message_text for s in debts_phrases):
+                reply_message = get_debts_report(user_id)
+            
+            # 3. Definir Rendimento
+            income_phrases = ["definir rendimento", "meu rendimento e", "definir salario", "meu salario e", "rendimento mensal", "salario mensal", "definir ganho", "meu ganho e", "setar rendimento", "atualizar rendimento", "mudar rendimento", "rendimento eh", "salario eh", "ganho mensal", "definir income", "meu income e", "set income", "update salario", "meu rendimento atual", "definir meu rendimento", "rendimento [valor]", "salario [valor]", "ganhei mensal [valor]", "meu salario mensal [valor]", "definir rendimento mensal", "atualiza salario", "mudar salario", "salario novo", "rendimento novo", "setar salario", "definir ganhos", "meus ganhos sao", "ganhos mensais", "definir provento", "meu provento e", "proventos [valor]", "definir renda", "minha renda e", "renda mensal", "setar renda", "update renda", "renda eh", "minha renda mensal [valor]", "definir minha renda", "renda [valor]", "ganho [valor]", "meu ganho mensal [valor]", "definir ganho mensal", "atualizar ganho", "mudar ganho", "ganho novo", "setar ganho", "definir pagamento mensal", "meu pagamento e", "pagamento mensal [valor]", "definir mesada", "minha mesada e", "mesada [valor]", "definir faturamento", "meu faturamento e", "faturamento [valor]", "definir lucro", "meu lucro e", "lucro [valor]"]  
+            if any(s in message_text for s in income_phrases):
+                values = extract_all_monetary_values(original_message_text)
+                if values: reply_message = set_income(user_id, values[0])
+                else: reply_message = "Não entendi o valor. Tente `definir rendimento [valor]`."
+            
+            # 4. Ver Orçamento
+            budget_phrases = ["meu orcamento", "ver orcamento", "relatorio orcamento", "como ta meu budget", "budget atual", "ver budget", "orcamento mensal", "meu budget", "exibe orcamento", "mostra orcamento", "orcamento agora", "relatorio budget", "ver meu orcamento", "quais meu orcamento", "orcamento por favor", "meu orcamento atual", "ver orcamento mensal", "budget mensal", "meu plano financeiro", "ver plano", "plano orcamento", "exibe plano", "mostra plano financeiro", "orcamento detalhado", "detalhes orcamento", "ver detalhes budget", "resumo orcamento", "summary budget", "meu summary orcamento", "orcamento resumido", "ver resumido", "budget resumido", "como esta meu orcamento", "status orcamento", "ver status budget", "atualizacao orcamento", "update orcamento ver", "meu orcamento eh", "ver meu plano", "plano mensal", "ver plano mensal"]  
+            elif any(s in message_text for s in budget_phrases):
+                reply_message = get_budget_report(user_id)
+            
+            # 5. Dica Financeira
+            tip_phrases = ["dica financeira", "dica pra economizar", "me da uma dica", "dica de grana", "tip financeiro", "conselho financeiro", "dica poupar", "como economizar", "dica investimento", "tip poupanca", "conselho grana", "dica dinheiro", "me ajuda a economizar", "dicas financas", "dica rapida", "tip rapido", "conselho rapido", "dica do dia", "tip do dia", "conselho do dia", "dica financeira por favor", "me da dica financeira", "quero uma dica", "dica ai", "tip ai", "conselho ai", "dica pra poupar", "como poupar", "dica pra investir", "como investir", "dica basica", "tip basico", "conselho basico", "dica avancada", "tip avancado", "conselho avancado", "dica sobre orcamento", "tip budget", "conselho orcamento", "dica sobre dividas", "tip debts", "conselho dividas", "dica sobre metas", "tip metas", "conselho metas"]  
+            elif any(s in message_text for s in tip_phrases):
+                reply_message = get_financial_tip()
+            
+            # 6. Comparar Gastos
+            compare_phrases = ["comparar gastos", "compara mes passado", "comparacao gastos", "ver comparacao", "gastos comparados", "comparar mes atual", "comparar despesas", "ver diferenca gastos", "diferenca mes", "comparar agora vs antes", "comparacao financeira", "ver comparativo", "comparativo gastos", "compara gastos mensais", "comparar mes a mes", "ver mudancas gastos", "mudancas em gastos", "analise comparativa", "comparar periodos", "ver comparacao periodos", "gastos vs mes passado", "despesas vs anterior", "comparar saidas", "ver comparacao saidas", "comparativo despesas", "analisar diferenca", "diferenca gastos", "compara agora", "comparacao rapida", "ver rapida comparacao", "gastos comparativos", "comparar meu gastos"]  
+            elif any(s in message_text for s in compare_phrases):
+                reply_message = compare_expenses(user_id)
+            
+            # 7. Resumo Financeiro
+            summary_phrases = ["resumo financeiro", "visao geral da grana", "resumo grana", "ver resumo", "summary financeiro", "resumo atual", "visao geral", "resumo saldo", "resumo entradas saidas", "resumo total", "ver visao geral", "resumo por favor", "meu resumo", "resumo rapido", "quick summary", "resumo financas", "visao financas", "resumo mensal", "monthly summary", "resumo semanal", "weekly summary", "resumo diario", "daily summary", "resumo completo", "full summary", "resumo detalhado", "detailed summary", "resumo basico", "basic summary", "ver meu resumo", "mostra resumo", "exibe resumo", "resumo agora"]  
+            elif any(s in message_text for s in summary_phrases):
+                reply_message = get_financial_summary(user_id)
+            
+            # 8. Ver Saldo
+            balance_phrases = ["qual o meu saldo", "meu saldo", "ver saldo", "saldo atual", "como esta meu saldo", "quanto sobrou", "quanto eu tenho", "saldo", "ver meu saldo", "quanto ta sobrando", "meu dinheiro", "quanto em conta", "saldo agora", "ver saldo atual", "quanto tenho", "saldo por favor", "me mostra o saldo", "exibe saldo", "quanto sobrou ai", "to com quanto", "meu sld", "sald", "balanco", "ver balanco", "quanto $$", "dinheiro atual", "ver dinheiro", "quanto na conta", "conta atual", "ver conta", "saldo total", "total saldo", "quanto eh meu saldo", "saldo eh", "ver meu dinheiro", "quanto meu dinheiro", "saldo rapido", "quick saldo", "saldo basico", "ver saldo basico", "saldo detalhado", "detailed saldo", "como ta a conta", "conta ta como", "ver status conta", "status saldo", "atualizacao saldo", "update saldo ver"]  
+            elif any(s in message_text for s in balance_phrases):
+                balance = get_current_balance(user_id)
+                reply_message = f"💵 Seu saldo atual é de *R${balance:.2f}*."
+            
+            # 9. Apagar Último Gasto
+            delete_phrases = ["apagar ultimo gasto", "excluir ultimo", "deletar ultimo gasto", "remover ultimo", "apaga o ultimo", "exclui ultimo gasto", "delete last", "remove ultimo", "cancela ultimo gasto", "anula ultimo", "desfazer ultimo", "undo last expense", "apagar recente", "excluir recente", "deletar recente", "remover recente", "apaga recente", "exclui recente", "delete recent", "remove recent", "cancela recente", "anula recente", "desfazer recente", "undo recent", "apagar ultimo registro", "excluir ultimo registro", "deletar ultimo registro", "remover ultimo registro", "apaga ultimo registro", "exclui ultimo registro", "delete last record", "remove last record", "cancela ultimo registro", "anula ultimo registro", "desfazer ultimo registro", "undo last record"]  
+            elif any(s in message_text for s in delete_phrases):
+                reply_message = delete_last_expense(user_id)
+            
+            # 10. Metas
+            meta_phrases_set = ["definir meta", "adicionar meta", "setar meta", "criar meta", "nova meta", "meta nova", "definir poupanca", "meta poupar", "quero meta", "set meta", "add meta", "create meta", "new meta", "definir objetivo", "adicionar objetivo", "setar objetivo", "criar objetivo", "novo objetivo", "objetivo novo", "definir target", "adicionar target", "set target", "add target", "new target", "meta [descricao] [valor]", "objetivo [descricao] [valor]", "poupar pra [descricao] [valor]", "quero poupar [valor] pra [descricao]", "meta de [valor] pra [descricao]"]
+            meta_phrases_get = ["minhas metas", "ver metas", "lista metas", "relatorio metas", "quais metas", "metas pendentes", "ver objetivos", "lista objetivos", "relatorio objetivos", "quais objetivos", "objetivos pendentes", "ver targets", "lista targets", "my metas", "see metas", "list metas", "metas report", "what metas", "metas status", "progresso metas", "ver progresso metas", "metas atuais", "current metas", "exibe metas", "mostra metas", "metas por favor"]
+            if any(s in message_text for s in meta_phrases_set):
+                values = extract_all_monetary_values(original_message_text)
+                if values:
+                    description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', original_message_text).strip()
+                    description = re.sub(r'definir meta|adicionar meta|setar meta|criar meta|nova meta|definir poupanca|meta poupar|quero meta|definir objetivo|adicionar objetivo|setar objetivo|criar objetivo|novo objetivo|definir target|adicionar target', '', description, flags=re.IGNORECASE).strip()
+                    reply_message = save_meta_to_csv(user_id, description.capitalize(), values[0])
+                else:
+                    reply_message = "Não entendi o valor. Tente `definir meta [descricao] [valor]`."
+            elif any(s in message_text for s in meta_phrases_get):
+                reply_message = get_metas_report(user_id)
+            
+            # 11. Recorrentes
+            rec_phrases_set = ["adicionar recorrente", "definir recorrente", "setar recorrente", "criar recorrente", "novo recorrente", "recorrente novo", "adicionar fixo", "definir fixo", "gasto fixo", "add recorrente", "set recorrente", "new recorrente", "todo mes [descricao]", "toda semana [descricao]", "recorrente [descricao] [valor] [frequencia]", "fixo [descricao] [valor] [frequencia]", "adicionar gasto recorrente", "definir gasto fixo", "setar gasto recorrente", "criar fixo"]
+            rec_phrases_get = ["meus recorrentes", "ver recorrentes", "lista recorrentes", "gastos fixos", "ver fixos", "lista fixos", "relatorio recorrentes", "quais recorrentes", "recorrentes pendentes", "my recorrentes", "see recorrentes", "list recorrentes", "fixos report", "what fixos", "recorrentes status", "ver gastos recorrentes", "lista gastos fixos", "exibe recorrentes", "mostra fixos", "recorrentes por favor"]
+            if any(s in message_text for s in rec_phrases_set):
+                values = extract_all_monetary_values(original_message_text)
+                if values:
+                    parts = re.split(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$)', original_message_text)
+                    description = ''
+                    frequency = 'mensal'  # Default
+                    for part in parts:
+                        if 'semana' in normalize_text(part): frequency = 'semanal'
+                        elif 'mes' in normalize_text(part): frequency = 'mensal'
+                        elif 'ano' in normalize_text(part): frequency = 'anual'
+                        elif 'dia' in normalize_text(part): frequency = 'diario'
+                        else: description += part.strip()
+                    description = re.sub(r'adicionar recorrente|definir recorrente|setar recorrente|criar recorrente|novo recorrente|adicionar fixo|definir fixo|gasto fixo|todo mes|toda semana|recorrente|fixo|adicionar gasto recorrente|definir gasto fixo|setar gasto recorrente|criar fixo', '', description, flags=re.IGNORECASE).strip()
+                    reply_message = save_recorrente_to_csv(user_id, description.capitalize(), values[0], frequency)
+                else:
+                    reply_message = "Não entendi o valor. Tente `adicionar recorrente [descricao] [valor] [frequencia]`."
+            elif any(s in message_text for s in rec_phrases_get):
+                reply_message = get_recorrentes_report(user_id)
+            
+            # 12. Relatório de Gastos por Período
+            expense_report_phrases = ["gastos d", "relatorio d", "gastos do", "relatorio do", "ver gastos", "lista gastos", "despesas d", "ver despesas", "gastos hoje", "gastos dia", "gastos semana", "gastos mes", "relatorio hoje", "relatorio dia", "relatorio semana", "relatorio mes", "o q gastei", "quanto gastei", "gastos atuais", "despesas atuais", "ver meus gastos", "mostra gastos", "exibe despesas", "gastos por favor", "relatorio despesas", "gastos diarios", "daily expenses", "gastos semanais", "weekly expenses", "gastos mensais", "monthly expenses", "ver gastos dia", "ver gastos semana", "ver gastos mes", "lista despesas dia", "lista despesas semana", "lista despesas mes"]
+            if any(s in message_text for s in expense_report_phrases):
+                if "hoje" in message_text or "dia" in message_text: reply_message = get_period_report(user_id, "dia")
+                elif "semana" in message_text: reply_message = get_period_report(user_id, "semana")
+                elif "mes" in message_text or "mês" in message_text: reply_message = get_period_report(user_id, "mês")
+                else: reply_message = "Não entendi o período. Tente `gastos do dia`, `da semana` ou `do mês`."
+            
+            # 13. Entradas e Saídas por Período
+            io_phrases = ["entrada e saida", "entrou e saiu", "balanco", "entradas saidas", "io summary", "ver entradas", "ver saidas", "quanto entrou", "quanto saiu", "balanco hoje", "balanco dia", "balanco semana", "balanco mes", "entradas hoje", "saidas dia", "entradas semana", "saidas mes", "ver balanco", "mostra entradas saidas", "exibe balanco", "balanco por favor", "resumo entradas saidas", "io report", "entradas e saidas hoje", "entrou e saiu dia", "entradas e saidas semana", "entrou e saiu mes", "quanto entrou e saiu", "balanco rapido", "quick balanco", "balanco detalhado", "detailed io"]
+            if any(s in message_text for s in io_phrases):
+                if "hoje" in message_text or "dia" in message_text: reply_message = get_io_summary(user_id, "dia")
+                elif "semana" in message_text: reply_message = get_io_summary(user_id, "semana")
+                elif "mes" in message_text or "mês" in message_text: reply_message = get_io_summary(user_id, "mês")
+                else: reply_message = "Não entendi o período. Tente `entradas e saídas de hoje`."
+            
+            # 14. Pagamento de Dívida
+            pay_debt_phrases = ["pagamento de divida", "paguei a divida", "paguei a conta", "quitei", "pago divida", "paguei debito", "conta paga", "divida quitada", "paguei [descricao]", "quitei [descricao]", "pago [descricao]", "conta quitada", "debito pago", "paguei a luz", "paguei agua", "paguei internet", "quitei aluguel", "pago condominio", "divida paga", "ver pago", "confirmar pagamento", "registrar pagamento divida", "paguei divida de [valor]", "quitei conta", "pago a divida", "conta foi paga", "divida foi quitada", "paguei sim", "quitei sim", "pago ok", "conta ok", "debito ok"]
+            elif any(keyword in message_text for keyword in pay_debt_phrases):
+                description = re.sub(r'|'.join(pay_debt_phrases), '', message_text, flags=re.IGNORECASE).strip()
+                values = extract_all_monetary_values(original_message_text)
+                if values:
+                    description_text_only = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', description).strip()
+                    delete_response = delete_debt_from_csv(user_id, description_text_only)
+                    save_expense_to_csv(user_id, f"Pagamento: {description_text_only.capitalize()}", values[0])
+                    record_expense_and_update_balance(user_id, values[0])
+                    current_balance = get_current_balance(user_id)
+                    reply_message = f"{delete_response}\n\nSeu saldo agora é de *R${current_balance:.2f}*."
+                else:
+                    reply_message = "Não consegui identificar o valor pago. Tente: `paguei a conta de luz 150`"
+            
+            # 15. Adicionar Dívida
+            debt_phrases = ["divida", "parcela", "vence", "vencimento", "conta a pagar", "debito novo", "adicionar divida", "nova divida", "registrar divida", "divida [descricao] [valor]", "parcela [valor]", "vence dia [data] [valor]", "vencimento em [data]", "conta luz [valor]", "divida aluguel [valor]", "parcela carro [valor]", "adicionar debito", "novo debito", "registrar parcela", "divida nova", "debito [descricao] [valor]", "add divida", "new debt", "register debt", "divida vence [data]", "parcela vence [data]", "conta vence [data]"]
+            elif any(keyword in message_text for keyword in debt_phrases):
+                values = extract_all_monetary_values(original_message_text)
+                date = extract_date(original_message_text)
+                if values:
+                    description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', original_message_text).strip()
+                    description = re.sub(r'|'.join(debt_phrases), '', description, flags=re.IGNORECASE).strip()
+                    reply_message = save_debt_to_csv(user_id, values[0], description.capitalize(), date=date if date else "Sem data")
+                else:
+                    reply_message = "Entendi que é uma dívida, mas não consegui identificar o valor."
+            
+            # 16. Adicionar Recebimento
+            income_add_phrases = ["recebi", "salario", "ganhei", "deposito", "entrou", "recebido", "pagamento recebido", "salario entrou", "ganhei [valor]", "deposito [valor]", "recebi salario", "entrou na conta", "recebimento", "add income", "new income", "register income", "recebi [descricao] [valor]", "salario de [valor]", "ganhei bonus [valor]", "deposito bancario [valor]", "recebi pagamento", "entrou grana", "grana entrou", "recebi dinheiro", "dinheiro entrou", "add recebimento", "novo recebimento", "registrar salario", "salario novo", "ganho novo", "recebi sim", "entrou ok", "pagamento ok"]
+            if any(keyword in message_text for keyword in income_add_phrases):
+                values = extract_all_monetary_values(original_message_text)
+                if not values:
+                    reply_message = "Entendi que é uma entrada, mas não consegui identificar o valor."
+                elif any(s in message_text for s in ["ja tinha", "tinha na conta", "meu saldo e", "saldo inicial", "definir saldo", "set saldo", "atualizar saldo", "mudar saldo", "saldo eh", "conta tem", "iniciar saldo", "start balance", "initial balance"]):
+                    total_balance = sum(values)
+                    reply_message = set_balance(user_id, total_balance)
+                else:
+                    payment_value = max(values)
+                    description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', original_message_text).strip()
+                    description = re.sub(r'|'.join(income_add_phrases), '', description, flags=re.IGNORECASE).strip()
+                    reply_message = record_payment_and_update_balance(user_id, payment_value, description.capitalize() if description else "Entrada")
+            
+            # 17. Fallback: Gasto
+            elif not reply_message:
+                values = extract_all_monetary_values(original_message_text)
+                if values:
+                    value = values[0]
+                    description = re.sub(r'(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{1,2}|\d{1,3}(?:\.\d{3})*|\d+\.\d{2}|\d+|R\$|\s+)', ' ', original_message_text).strip()
+                    description = re.sub(r'^(de|da|do|no|na|gastei|gasto|despesa|add gasto|new expense|register expense)\s', '', description, flags=re.IGNORECASE)
                     
-        except (IndexError, KeyError) as e:
-            # Erro comum se a estrutura do JSON não for a esperada (ex: notificação de status)
-            print(f"Payload não é uma mensagem de usuário: {e}")
+                    if not description.strip():
+                        reply_message = "Parece que você enviou um valor sem descrição. Tente de novo, por favor (ex: `almoço 25,50`)."
+                    else:
+                        category = save_expense_to_csv(user_id, description.capitalize(), value)
+                        record_expense_and_update_balance(user_id, value)
+                        today_str = datetime.datetime.now(TIMEZONE).strftime("%d/%m")
+                        current_balance = get_current_balance(user_id)
+                        reply_message = f"✅ Gasto Registrado em {today_str}! ({category})\n- {description.capitalize()}: R${value:.2f}\n\nSeu saldo atual é *R${current_balance:.2f}*."
+                else:
+                    reply_message = f"Não entendi, {user_name}. Se for um gasto, tente `[descrição] [valor]`. Se precisar de ajuda, envie `comandos`."
+
+            if reply_message:
+                send_whatsapp_message(user_id, reply_message)
+
+        except (KeyError, IndexError, TypeError) as e:
+            print(f"Erro ao processar o webhook: {e}\nData: {request.get_data(as_text=True)}")
             pass
-        except Exception as e:
-            print(f"!!! ERRO CRÍTICO NO WEBHOOK: {e} !!!")
-            # Tenta notificar o usuário do erro, se possível
-            try:
-                user_id = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
-                send_whatsapp_message(user_id, "❌ Desculpe, encontrei um erro inesperado. Minha equipe de engenheiros já foi notificada. Pode tentar de novo?")
-            except Exception as notify_error:
-                print(f"Falha ao notificar usuário sobre o erro: {notify_error}")
-                
+        
         return 'EVENT_RECEIVED', 200
 
 if __name__ == "__main__":
-# Forçando novo deploy para ativar o Gemini
+    app.run(debug=False, port=os.getenv("PORT", default=5000))  # Desativado debug para produção
