@@ -1,44 +1,30 @@
 import sqlite3
 
+DATABASE = 'financeiro.db'
+
 def get_db():
-    conn = sqlite3.connect("financas.db")
-    conn.row_factory = sqlite3.Row
+    conn = sqlite3.connect(DATABASE)
     return conn
 
 def create_tables():
-    conn = get_db()
+    conn = get_di()
     c = conn.cursor()
+    # Tabela de transações evoluída para incluir status e data de vencimento
     c.execute('''
         CREATE TABLE IF NOT EXISTS transacoes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT,
-            tipo TEXT,
+            user_id TEXT NOT NULL,
+            tipo TEXT NOT NULL, -- 'receita', 'despesa', 'divida'
             categoria TEXT,
-            valor REAL,
-            data TEXT,
+            valor REAL NOT NULL,
+            data TEXT NOT NULL,
             descricao TEXT,
-            recorrencia TEXT,
-            data_vencimento TEXT,
-            status TEXT DEFAULT 'pago',
-            observacao TEXT
-        )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS orcamentos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT,
-            categoria TEXT,
-            valor_limite REAL
-        )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS metas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT,
-            descricao TEXT,
-            valor_meta REAL,
-            valor_atual REAL DEFAULT 0
+            data_vencimento TEXT, -- Apenas para dívidas
+            status TEXT NOT NULL -- 'pago', 'pendente'
         )
     ''')
     conn.commit()
     conn.close()
+
+if __name__ == '__main__':
+    create_tables()

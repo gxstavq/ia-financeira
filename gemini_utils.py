@@ -1,60 +1,84 @@
 import google.generativeai as genai
 import os
-import json
 import re
+import json
+from datetime import date, timedelta
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+# Configuração da API Key do Gemini
+# Lembre-se de configurar a variável de ambiente GOOGLE_API_KEY no Render
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
 def extrair_json(texto):
-    """
-    Esta função "limpa" a resposta da IA para extrair apenas o JSON.
-    """
+    """Extrai um objeto JSON de uma string, mesmo que esteja dentro de blocos de código Markdown."""
     match = re.search(r'\{.*\}', texto, re.DOTALL)
     if match:
         json_str = match.group(0)
         try:
             return json.loads(json_str)
         except json.JSONDecodeError:
-            print(f"Erro: A string extraída não é um JSON válido: {json_str}")
+            print(f"Erro ao decodificar o JSON extraído: {json_str}")
             return None
-    else:
-        print(f"Erro: Nenhum JSON encontrado na resposta da IA: {texto}")
-        return None
+    return None
 
 def interpretar_mensagem_gemini(mensagem_usuario):
     """
-    Envia a mensagem do usuário para a IA e interpreta a resposta JSON.
+    Usa a IA Gemini para interpretar a mensagem do usuário e extrair informações financeiras estruturadas.
+    Agora entende uma gama muito maior de intenções e entidades.
     """
-    # PROMPT MELHORADO: Instruções mais claras para a IA.
+    hoje = date.today()
+    amanha = hoje + timedelta(days=1)
+
     prompt = f"""
-    Sua tarefa é analisar a mensagem de um usuário para um bot de finanças e retornar SEMPRE uma resposta em formato JSON.
+    Você é um assistente financeiro especialista. Sua tarefa é analisar a mensagem do usuário e extrair os dados em um formato JSON.
 
-    1.  **Se a mensagem for um registro de gasto ou receita**:
-        - Extraia as informações para as seguintes chaves: "intencao" (use "registrar_gasto" ou "registrar_receita"), "valor", "categoria", "data", "descricao", "recorrencia", "data_vencimento", "observacao".
-        - Se uma informação não for encontrada, use o valor null.
+    O JSON deve ter a seguinte estrutura:
+    {{
+      "intencao": "...",           // Ação principal do usuário
+      "valor": "...",             // Valor numérico da transação
+      "categoria": "...",         // Categoria (Alimentação, Salário, Contas, etc.)
+      "descricao": "...",         // Descrição do item
+      "data": "...",              // Data da transação (formato AAAA-MM-DD)
+      "data_vencimento": "...",   // Data de vencimento para dívidas (formato AAAA-MM-DD)
+      "status": "..."             // 'pago' para despesas e receitas, 'pendente' para dívidas
+    }}
 
-    2.  **Se a mensagem for uma saudação** (como "oi", "olá", "bom dia"):
-        - Retorne o JSON: {{"intencao": "saudacao", "valor": null, "categoria": null, "data": null, "descricao": null, "recorrencia": null, "data_vencimento": null, "observacao": null}}
+    Possíveis intenções:
+    - 'registrar_gasto': O usuário informa uma despesa. Ex: "gastei 50 no mercado". Status deve ser 'pago'.
+    - 'registrar_receita': O usuário informa um ganho. Ex: "recebi 2000 de salário". Status deve ser 'pago'.
+    - 'registrar_divida': O usuário informa uma conta a pagar. Ex: "conta de luz 150 vence dia 25". Status deve ser 'pendente'.
+    - 'marcar_pago': O usuário informa que pagou uma dívida. Ex: "paguei a conta de luz".
+    - 'consultar_saldo': O usuário quer saber o balanço. Ex: "qual meu saldo?".
+    - 'consultar_dividas': O usuário quer ver as contas pendentes. Ex: "quais contas eu tenho?".
+    - 'verificar_vencimentos': O usuário pede para verificar contas próximas do vencimento. Ex: "verificar contas a vencer".
+    - 'saudacao': Uma saudação simples. Ex: "oi", "bom dia".
+    - 'ajuda': O usuário pede ajuda.
+    - 'desconhecido': Se não conseguir identificar a intenção.
 
-    3.  **Se a mensagem não for nem um registro financeiro nem uma saudação**:
-        - Retorne o JSON: {{"intencao": "desconhecido", "valor": null, "categoria": null, "data": null, "descricao": null, "recorrencia": null, "data_vencimento": null, "observacao": null}}
+    Regras importantes:
+    1. Se não houver data explícita, use a data de hoje: {hoje.strftime('%Y-%m-%d')}.
+    2. Para "amanhã", use: {amanha.strftime('%Y-%m-%d')}.
+    3. Para dívidas, a 'data' é quando foi registrada (hoje) e 'data_vencimento' é a data informada.
+    4. Para a intenção 'marcar_pago', a 'descricao' é a chave. Tente extrair o que foi pago (ex: "conta de luz").
+    5. Se for uma saudação ou consulta, os outros campos podem ser nulos.
 
-    NUNCA responda com texto normal ou explicações. Sua resposta deve ser APENAS o JSON.
-
-    A mensagem do usuário é: "{mensagem_usuario}"
+    Analise a mensagem a seguir:
+    "{mensagem_usuario}"
     """
-
-    print("Enviando prompt para a IA...")
-    response = model.generate_content(prompt)
-    print(f"Resposta bruta da IA: {response.text}")
-
-    dados_transacao = extrair_json(response.text)
-
-    if dados_transacao:
-        print(f"JSON extraído com sucesso: {dados_transacao}")
-        return dados_transacao
-    else:
-        print("Falha ao extrair ou decodificar o JSON da resposta.")
+    try:
+        print("Enviando prompt para a IA...")
+        response = model.generate_content(prompt)
+        print("Resposta bruta da IA:", response.text)
+        
+        dados_json = extrair_json(response.text)
+        if dados_json:
+            print("JSON extraído com sucesso:", dados_json)
+            return dados_json
+        else:
+            print("Não foi possível extrair JSON da resposta.")
+            return None
+    except Exception as e:
+        print(f"Erro ao chamar a API do Gemini: {e}")
         return None
 

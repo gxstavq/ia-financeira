@@ -1,7 +1,4 @@
-flask
-gunicorn
-requests
-pandas
-scikit-learn
-python-dotenv
+Flask
 google-generativeai
+requests
+gunicorn
