@@ -7,7 +7,8 @@ def get_db():
     return conn
 
 def create_tables():
-    conn = get_di()
+    # Corrigido de get_di() para get_db()
+    conn = get_db()
     c = conn.cursor()
     # Tabela de transações evoluída para incluir status e data de vencimento
     c.execute('''
@@ -28,3 +29,4 @@ def create_tables():
 
 if __name__ == '__main__':
     create_tables()
+
